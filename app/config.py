@@ -1,6 +1,6 @@
 import torch
 
-REGISTRY_PATH = "app/model_manager/toy_registry.yaml"
+REGISTRY_PATH = "app/model_manager/registry.yaml"
 RESOURCES_PATH = "app/resources"
 
 def get_device():
