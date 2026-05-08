@@ -19,8 +19,10 @@ and exporting the class here.  See ``base.py`` for the full extension guide.
 
 from app.src.format.base import DataFormatter
 from app.src.format.passthrough import PassthroughFormatter
+from app.src.format.dt4h import Dt4hFormatter
 
 __all__ = [
     "DataFormatter",
     "PassthroughFormatter",
+    "Dt4hFormatter",
 ]
