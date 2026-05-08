@@ -1,0 +1,159 @@
+ner:
+  cz:
+    disease:
+      repo_id: MultiClinNER/BSC_MultiClinNER_CZ_DIS
+      local_path: null
+    symptoms:
+      repo_id: MultiClinNER/BSC_MultiClinNER_CZ_SYMP
+      local_path: null
+    procedure:
+      repo_id: MultiClinNER/BSC_MultiClinNER_CZ_PROC
+      local_path: null
+    negation:
+      repo_id: null
+      local_path: null
+  en:
+    disease:
+      repo_id: MultiClinNER/BSC_MultiClinNER_EN_DIS
+      local_path: null
+    symptoms:
+      repo_id: MultiClinNER/BSC_MultiClinNER_EN_SYMP
+      local_path: null
+    procedure:
+      repo_id: MultiClinNER/BSC_MultiClinNER_EN_PROC
+      local_path: null
+    negation:
+      repo_id: null
+      local_path: null
+  es:
+    disease:
+      repo_id: MultiClinNER/BSC_MultiClinNER_ES_DIS
+      local_path: null
+    symptoms:
+      repo_id: MultiClinNER/BSC_MultiClinNER_ES_SYMP
+      local_path: null
+    procedure:
+      repo_id: MultiClinNER/BSC_MultiClinNER_ES_PROC
+      local_path: null
+    negation:
+      repo_id: BSC-NLP4BIA/negation-tagger
+      local_path: null
+  it:
+    disease:
+      repo_id: MultiClinNER/BSC_MultiClinNER_IT_DIS
+      local_path: null
+    symptoms:
+      repo_id: MultiClinNER/BSC_MultiClinNER_IT_SYMP
+      local_path: null
+    procedure:
+      repo_id: MultiClinNER/BSC_MultiClinNER_IT_PROC
+      local_path: null
+    negation:
+      repo_id: null
+      local_path: null
+  nl:
+    disease:
+      repo_id: MultiClinNER/BSC_MultiClinNER_NL_DIS
+      local_path: null
+    symptoms:
+      repo_id: MultiClinNER/BSC_MultiClinNER_NL_SYMP
+      local_path: null
+    procedure:
+      repo_id: MultiClinNER/BSC_MultiClinNER_NL_PROC
+      local_path: null
+    negation:
+      repo_id: null
+      local_path: null
+  ro:
+    disease:
+      repo_id: MultiClinNER/BSC_MultiClinNER_RO_DIS
+      local_path: null
+    symptoms:
+      repo_id: MultiClinNER/BSC_MultiClinNER_RO_SYMP
+      local_path: null
+    procedure:
+      repo_id: MultiClinNER/BSC_MultiClinNER_RO_PROC
+      local_path: null
+    negation:
+      repo_id: null
+      local_path: null
+  sv:
+    disease:
+      repo_id: MultiClinNER/BSC_MultiClinNER_SV_DIS
+      local_path: null
+    symptoms:
+      repo_id: MultiClinNER/BSC_MultiClinNER_SV_SYMP
+      local_path: null
+    procedure:
+      repo_id: MultiClinNER/BSC_MultiClinNER_SV_PROC
+      local_path: null
+    negation:
+      repo_id: null
+      local_path: null
+nel:
+  cz:
+    repo_id: cambridgeltl/SapBERT-UMLS-2020AB-all-lang-from-XLMR-large
+    local_path: null
+  en:
+    repo_id: cambridgeltl/SapBERT-UMLS-2020AB-all-lang-from-XLMR-large
+    local_path: null
+  es:
+    repo_id: ICB-UMA/ClinLinker-KB-GP
+    local_path: null
+  it:
+    repo_id: cambridgeltl/SapBERT-UMLS-2020AB-all-lang-from-XLMR-large
+    local_path: null
+  nl:
+    repo_id: cambridgeltl/SapBERT-UMLS-2020AB-all-lang-from-XLMR-large
+    local_path: null
+  ro:
+    repo_id: cambridgeltl/SapBERT-UMLS-2020AB-all-lang-from-XLMR-large
+    local_path: null
+  sv:
+    repo_id: cambridgeltl/SapBERT-UMLS-2020AB-all-lang-from-XLMR-large
+    local_path: null
+gazetteers:
+  cz:
+    disease: <path_to_gazetteer>
+    symptoms: <path_to_gazetteer>
+  en:
+    disease: <path_to_gazetteer>
+    symptoms: <path_to_gazetteer>
+  es:
+    disease: <path_to_gazetteer>
+    symptoms: <path_to_gazetteer>
+  it:
+    disease: <path_to_gazetteer>
+    symptoms: <path_to_gazetteer>
+  nl:
+    disease: <path_to_gazetteer>
+    symptoms: <path_to_gazetteer>
+  ro:
+    disease: <path_to_gazetteer>
+    symptoms: <path_to_gazetteer>
+  sv:
+    disease: <path_to_gazetteer>
+    symptoms: <path_to_gazetteer>
+  
+vectorized_dbs:
+  cz:
+    disease: null
+    symptoms: null
+  en:
+    disease: null
+    symptoms: null
+  es:
+    disease: null
+    symptoms: null
+  it:
+    disease: null
+    symptoms: null
+  nl:
+    disease: null
+    symptoms: null
+  ro:
+    disease: null
+    symptoms: null
+  sv:
+    disease: null
+    symptoms: null
