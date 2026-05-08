@@ -211,10 +211,10 @@ class Dt4hFormatter(DataFormatter):
                 "concept_str":          ann["term"],
                 "concept_code":         ann["code"],
                 "concept_confidence":   ann["nel_score"],
-                "negation":             "yes" if ann["is_negated"] else "no",
-                "negation_confidence":  ann["negation_score"],
-                "uncertainty":          "yes" if ann["is_uncertain"] else "no",
-                "uncertainty_confidence":ann["uncertainty_score"],
+                "negation":             "yes" if ann.get("is_negated", False) else "no",
+                "negation_confidence":  ann.get("negation_score", 0.0),
+                "uncertainty":          "yes" if ann.get("is_uncertain", False) else "no",
+                "uncertainty_confidence":ann.get("uncertainty_score", 0.0),
             }
         except KeyError as exc:
             raise ValueError(f"Missing expected annotation field: {exc}") from exc
