@@ -29,4 +29,4 @@ RUN apt-get update && \
 ENV FLASK_APP=app
 ENV FLASK_ENV=development
 
-CMD uv run python -m app.initializer && uv run flask run --host=0.0.0.0 --port=5000 --reload
+CMD uv run python -m app.model_manager && uv run flask run --host=0.0.0.0 --port=5000 --reload
