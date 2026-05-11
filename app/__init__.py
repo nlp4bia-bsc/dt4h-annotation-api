@@ -5,6 +5,7 @@ from app.src.pipelines import LookupPipeline, FuzzyMatchPipeline, BM25OkapiPipel
 from app.src.format import PassthroughFormatter, Dt4hFormatter
 
 app = Flask(__name__)
+app.json.sort_keys = False
 
 method2pipeline = {
     'lookup': LookupPipeline,
