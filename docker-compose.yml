@@ -3,7 +3,6 @@ services:
     build: . # builds using the ./Dockerfile
     user: root
     environment:
-      CUDA_VISIBLE_DEVICES: ""
       LANGUAGE: es
     ports:
       - "5000:5000"
