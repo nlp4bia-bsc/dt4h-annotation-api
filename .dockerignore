@@ -1,5 +1,5 @@
 .venv
-app/resources
+app/spa_resources
 __pycache__
 *.pyc
 *.pyo

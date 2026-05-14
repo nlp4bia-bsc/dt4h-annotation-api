@@ -1,7 +1,7 @@
 import torch
 
-REGISTRY_PATH = "app/model_manager/registry.yaml"
-RESOURCES_PATH = "app/resources"
+REGISTRY_PATH = "/NERL_API/app/model_manager/registry.yaml"
+RESOURCES_PATH = "/NERL_API/app/resources"
 
 def get_device():
     if not torch.cuda.is_available():
