@@ -1,8 +1,11 @@
+import threading
+from datetime import datetime, timezone
 from functools import partial
 
 from flask import Flask, request, jsonify
 from app.src.pipelines import LookupPipeline, FuzzyMatchPipeline, BM25OkapiPipeline, BiencoderPipeline
 from app.src.format import PassthroughFormatter, Dt4hFormatter
+from app.model_manager import ModelManager
 
 app = Flask(__name__)
 app.json.sort_keys = False
@@ -18,6 +21,16 @@ method2pipeline = {
 }
 
 _pipeline_cache: dict = {}
+_sync_lock = threading.Lock()
+
+
+def _describe_resource(r) -> dict:
+    return {
+        "resource": r["resource"],
+        "lang": r["lang"],
+        "task": r["task"],
+        "repo_id": r["repo_id"],
+    }
 
 
 @app.route("/", methods=["GET"])
@@ -92,6 +105,68 @@ def process_bulk():
         for text, ann, footer in zip(texts, annotations, footers)
     ]
     return jsonify(results)
+
+
+@app.route('/sync_models', methods=['POST'])
+def sync_models():
+    """Download any pending resources from the registry and clear the pipeline cache.
+
+    Returns 200 (no_op or done), 206 (partial_error), 409 (already_running), or 500 (error).
+    """
+    acquired = _sync_lock.acquire(blocking=False)
+    if not acquired:
+        return jsonify({"status": "already_running", "message": "Sync already in progress."}), 409
+
+    started_at = datetime.now(timezone.utc).isoformat()
+    try:
+        manager = ModelManager()
+        pending_before = [_describe_resource(r) for r in manager.find_pending_resources()]
+
+        if not pending_before:
+            return jsonify({
+                "status": "no_op",
+                "started_at": started_at,
+                "finished_at": datetime.now(timezone.utc).isoformat(),
+                "pending_before": [],
+                "completed": [],
+                "errors": [],
+                "cache_cleared": False,
+            }), 200
+
+        manager.sanitize()
+
+        pending_after_keys = {
+            (r["resource"], r["lang"], r["task"])
+            for r in manager.find_pending_resources()
+        }
+        completed = [r for r in pending_before if (r["resource"], r["lang"], r["task"]) not in pending_after_keys]
+        errors    = [r for r in pending_before if (r["resource"], r["lang"], r["task"]) in pending_after_keys]
+
+        cache_cleared = False
+        if not errors:
+            _pipeline_cache.clear()
+            cache_cleared = True
+
+        return jsonify({
+            "status": "done" if not errors else "partial_error",
+            "started_at": started_at,
+            "finished_at": datetime.now(timezone.utc).isoformat(),
+            "pending_before": pending_before,
+            "completed": completed,
+            "errors": errors,
+            "cache_cleared": cache_cleared,
+        }), 200 if not errors else 206
+
+    except Exception as exc:
+        return jsonify({
+            "status": "error",
+            "message": str(exc),
+            "started_at": started_at,
+            "finished_at": datetime.now(timezone.utc).isoformat(),
+        }), 500
+
+    finally:
+        _sync_lock.release()
 
 
 if __name__ == '__main__':
