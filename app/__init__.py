@@ -120,9 +120,10 @@ def sync_models():
     started_at = datetime.now(timezone.utc).isoformat()
     try:
         manager = ModelManager()
-        pending_before = [_describe_resource(r) for r in manager.find_pending_resources()]
+        pending_before_full = manager.find_pending_resources()
+        pending_before = [_describe_resource(r) for r in pending_before_full]
 
-        if not pending_before:
+        if not pending_before_full:
             return jsonify({
                 "status": "no_op",
                 "started_at": started_at,
@@ -135,12 +136,24 @@ def sync_models():
 
         manager.sanitize()
 
+        # Gazetteers always re-appear in find_pending_resources (always re-validated, no done flag).
+        # Check their success by path existence; use pending-after diff for downloadable resources.
         pending_after_keys = {
             (r["resource"], r["lang"], r["task"])
             for r in manager.find_pending_resources()
+            if r["resource"] != "gazetteers"
         }
-        completed = [r for r in pending_before if (r["resource"], r["lang"], r["task"]) not in pending_after_keys]
-        errors    = [r for r in pending_before if (r["resource"], r["lang"], r["task"]) in pending_after_keys]
+        errors = []
+        for r_full, r in zip(pending_before_full, pending_before):
+            key = (r["resource"], r["lang"], r["task"])
+            if r["resource"] == "gazetteers":
+                if not r_full["local_path"].exists():
+                    errors.append(r)
+            elif key in pending_after_keys:
+                errors.append(r)
+
+        error_keys = {(e["resource"], e["lang"], e["task"]) for e in errors}
+        completed = [r for r in pending_before if (r["resource"], r["lang"], r["task"]) not in error_keys]
 
         cache_cleared = False
         if not errors:
