@@ -14,6 +14,7 @@ A Flask REST API that chains **Named Entity Recognition (NER)**, **Named Entity 
 6. [API Reference](#api-reference)
    - [GET /](#get-)
    - [POST /process_bulk](#post-process_bulk)
+   - [POST /sync_models](#post-sync_models)
 7. [Response Schema](#response-schema)
 8. [Examples](#examples)
 9. [Docker](#docker)
@@ -167,6 +168,46 @@ Annotate a batch of clinical texts. Designed for CogStack/NiFi: inference parame
 #### Response
 
 Array of DT4H CDM v2 objects, one per input item (see [Response Schema](#response-schema)).
+
+---
+
+### `POST /sync_models`
+
+Download pending resources from the registry and clear the pipeline cache. Call this after editing `registry.yaml` to add new models (setting `local_path: null`).
+
+Requests block until all downloads and vector DB builds complete — this may take several minutes for large models. Concurrent calls are rejected with `409`.
+
+#### Response
+
+| HTTP | `status` | Meaning |
+|---|---|---|
+| `200` | `no_op` | Nothing pending; registry already complete |
+| `200` | `done` | All pending resources downloaded; pipeline cache cleared |
+| `206` | `partial_error` | Some resources failed; cache NOT cleared (existing pipelines keep serving) |
+| `409` | `already_running` | Another sync is in progress |
+| `500` | `error` | Unexpected exception |
+
+Response body (all non-409 cases):
+
+```json
+{
+  "status": "done",
+  "started_at": "2026-05-15T10:00:00+00:00",
+  "finished_at": "2026-05-15T10:07:32+00:00",
+  "pending_before": [
+    {"resource": "ner", "lang": "es", "task": "disease", "repo_id": "BSC-NLP4BIA/..."}
+  ],
+  "completed": [ ... ],
+  "errors": [],
+  "cache_cleared": true
+}
+```
+
+#### Example
+
+```bash
+curl -X POST http://localhost:5000/sync_models
+```
 
 ---
 
