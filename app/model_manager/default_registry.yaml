@@ -1,95 +1,117 @@
 ner:
   cz:
     disease:
-      repo_id: MultiClinNER/BSC_MultiClinNER_CZ_DIS
+      repo_id: BSC-NLP4BIA/DT4H_XLM-R_stl_multilingual_disease
       local_path: null
-    symptoms:
-      repo_id: MultiClinNER/BSC_MultiClinNER_CZ_SYMP
+    symptom:
+      repo_id: BSC-NLP4BIA/DT4H_XLM-R_stl_multilingual_symptom
       local_path: null
     procedure:
-      repo_id: MultiClinNER/BSC_MultiClinNER_CZ_PROC
+      repo_id: BSC-NLP4BIA/DT4H_XLM-R_stl_multilingual_procedure
+      local_path: null
+    drug:
+      repo_id: null
       local_path: null
     negation:
-      repo_id: null
+      repo_id: null  # placeholder: no negation model available for Czech
       local_path: null
   en:
     disease:
-      repo_id: MultiClinNER/BSC_MultiClinNER_EN_DIS
+      repo_id: BSC-NLP4BIA/DT4H_XLM-R_mtl_en-nl-sv_disease
       local_path: null
-    symptoms:
-      repo_id: MultiClinNER/BSC_MultiClinNER_EN_SYMP
+    symptom:
+      repo_id: BSC-NLP4BIA/DT4H_XLM-R_mtl_en-nl-sv_symptom
       local_path: null
     procedure:
-      repo_id: MultiClinNER/BSC_MultiClinNER_EN_PROC
+      repo_id: BSC-NLP4BIA/DT4H_XLM-R_mtl_en-nl-sv_procedure
+      local_path: null
+    drug:
+      repo_id: null
       local_path: null
     negation:
-      repo_id: null
+      repo_id: null  # placeholder: no negation model available for English
       local_path: null
   es:
     disease:
-      repo_id: MultiClinNER/BSC_MultiClinNER_ES_DIS
+      repo_id: BSC-NLP4BIA/DT4H_XLM-R_mtl_es-it-ro_disease
       local_path: null
-    symptoms:
-      repo_id: MultiClinNER/BSC_MultiClinNER_ES_SYMP
+    symptom:
+      repo_id: BSC-NLP4BIA/DT4H_XLM-R_mtl_es-it-ro_symptom
       local_path: null
     procedure:
-      repo_id: MultiClinNER/BSC_MultiClinNER_ES_PROC
+      repo_id: BSC-NLP4BIA/DT4H_XLM-R_mtl_es-it-ro_procedure
+      local_path: null
+    drug:
+      repo_id: null
       local_path: null
     negation:
       repo_id: BSC-NLP4BIA/negation-tagger
       local_path: null
   it:
     disease:
-      repo_id: MultiClinNER/BSC_MultiClinNER_IT_DIS
+      repo_id: BSC-NLP4BIA/DT4H_XLM-R_mtl_es-it-ro_disease
       local_path: null
-    symptoms:
-      repo_id: MultiClinNER/BSC_MultiClinNER_IT_SYMP
+    symptom:
+      repo_id: BSC-NLP4BIA/DT4H_XLM-R_mtl_es-it-ro_symptom
       local_path: null
     procedure:
-      repo_id: MultiClinNER/BSC_MultiClinNER_IT_PROC
+      repo_id: BSC-NLP4BIA/DT4H_XLM-R_mtl_es-it-ro_procedure
+      local_path: null
+    drug:
+      repo_id: null
       local_path: null
     negation:
-      repo_id: null
+      repo_id: null  # placeholder: no negation model available for Italian
       local_path: null
   nl:
     disease:
-      repo_id: MultiClinNER/BSC_MultiClinNER_NL_DIS
+      repo_id: BSC-NLP4BIA/DT4H_XLM-R_mtl_en-nl-sv_disease
       local_path: null
-    symptoms:
-      repo_id: MultiClinNER/BSC_MultiClinNER_NL_SYMP
+    symptom:
+      repo_id: BSC-NLP4BIA/DT4H_XLM-R_mtl_en-nl-sv_symptom
       local_path: null
     procedure:
-      repo_id: MultiClinNER/BSC_MultiClinNER_NL_PROC
+      repo_id: BSC-NLP4BIA/DT4H_XLM-R_mtl_en-nl-sv_procedure
+      local_path: null
+    drug:
+      repo_id: null
       local_path: null
     negation:
-      repo_id: null
+      repo_id: null  # placeholder: no negation model available for Dutch
       local_path: null
   ro:
     disease:
-      repo_id: MultiClinNER/BSC_MultiClinNER_RO_DIS
+      repo_id: BSC-NLP4BIA/DT4H_XLM-R_mtl_es-it-ro_disease
       local_path: null
-    symptoms:
-      repo_id: MultiClinNER/BSC_MultiClinNER_RO_SYMP
+    symptom:
+      repo_id: BSC-NLP4BIA/DT4H_XLM-R_mtl_es-it-ro_symptom
       local_path: null
     procedure:
-      repo_id: MultiClinNER/BSC_MultiClinNER_RO_PROC
+      repo_id: BSC-NLP4BIA/DT4H_XLM-R_mtl_es-it-ro_procedure
+      local_path: null
+    drug:
+      repo_id: null
       local_path: null
     negation:
-      repo_id: null
+      repo_id: null  # placeholder: no negation model available for Romanian
       local_path: null
   sv:
     disease:
-      repo_id: MultiClinNER/BSC_MultiClinNER_SV_DIS
+      repo_id: BSC-NLP4BIA/DT4H_XLM-R_mtl_en-nl-sv_disease
       local_path: null
-    symptoms:
-      repo_id: MultiClinNER/BSC_MultiClinNER_SV_SYMP
+    symptom:
+      repo_id: BSC-NLP4BIA/DT4H_XLM-R_mtl_en-nl-sv_symptom
       local_path: null
     procedure:
-      repo_id: MultiClinNER/BSC_MultiClinNER_SV_PROC
+      repo_id: BSC-NLP4BIA/DT4H_XLM-R_mtl_en-nl-sv_procedure
       local_path: null
-    negation:
+    drug:
       repo_id: null
       local_path: null
+    negation:
+      repo_id: null  # placeholder: no negation model available for Swedish
+      local_path: null
+
 nel:
   cz:
     repo_id: cambridgeltl/SapBERT-UMLS-2020AB-all-lang-from-XLMR-large
@@ -98,7 +120,7 @@ nel:
     repo_id: cambridgeltl/SapBERT-UMLS-2020AB-all-lang-from-XLMR-large
     local_path: null
   es:
-    repo_id: ICB-UMA/ClinLinker-KB-GP
+    repo_id: ICB-UMA/ClinLinker-KB-P
     local_path: null
   it:
     repo_id: cambridgeltl/SapBERT-UMLS-2020AB-all-lang-from-XLMR-large
@@ -115,45 +137,73 @@ nel:
 gazetteers:
   cz:
     disease: <path_to_gazetteer>
-    symptoms: <path_to_gazetteer>
+    symptom: <path_to_gazetteer>
+    procedure: <path_to_gazetteer>
+    drug: <path_to_gazetteer>
   en:
     disease: <path_to_gazetteer>
-    symptoms: <path_to_gazetteer>
+    symptom: <path_to_gazetteer>
+    procedure: <path_to_gazetteer>
+    drug: <path_to_gazetteer>
   es:
     disease: <path_to_gazetteer>
-    symptoms: <path_to_gazetteer>
+    symptom: <path_to_gazetteer>
+    procedure: <path_to_gazetteer>
+    drug: <path_to_gazetteer>
   it:
     disease: <path_to_gazetteer>
-    symptoms: <path_to_gazetteer>
+    symptom: <path_to_gazetteer>
+    procedure: <path_to_gazetteer>
+    drug: <path_to_gazetteer>
   nl:
     disease: <path_to_gazetteer>
-    symptoms: <path_to_gazetteer>
+    symptom: <path_to_gazetteer>
+    procedure: <path_to_gazetteer>
+    drug: <path_to_gazetteer>
   ro:
     disease: <path_to_gazetteer>
-    symptoms: <path_to_gazetteer>
+    symptom: <path_to_gazetteer>
+    procedure: <path_to_gazetteer>
+    drug: <path_to_gazetteer>
   sv:
     disease: <path_to_gazetteer>
-    symptoms: <path_to_gazetteer>
+    symptom: <path_to_gazetteer>
+    procedure: <path_to_gazetteer>
+    drug: <path_to_gazetteer>
   
 vectorized_dbs:
   cz:
     disease: null
-    symptoms: null
+    symptom: null
+    procedure: null
+    drug: null
   en:
     disease: null
-    symptoms: null
+    symptom: null
+    procedure: null
+    drug: null
   es:
     disease: null
-    symptoms: null
+    symptom: null
+    procedure: null
+    drug: null
   it:
     disease: null
-    symptoms: null
+    symptom: null
+    procedure: null
+    drug: null
   nl:
     disease: null
-    symptoms: null
+    symptom: null
+    procedure: null
+    drug: null
   ro:
     disease: null
-    symptoms: null
+    symptom: null
+    procedure: null
+    drug: null
   sv:
     disease: null
-    symptoms: null
+    symptom: null
+    procedure: null
+    drug: null
