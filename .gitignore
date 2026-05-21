@@ -5,5 +5,4 @@ __pycache__/
 .venv/
 app/resources/*
 app/model_manager/registry.yaml
-test_annotations.py
-local_files/*
+app/config.py

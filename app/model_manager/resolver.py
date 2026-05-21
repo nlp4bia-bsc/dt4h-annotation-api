@@ -165,6 +165,12 @@ class LocalResolver:
                 "app/registry.yaml under gazetteers › <lang> › <entity>."
             )
 
+        if raw is None:
+            raise ModelNotFoundError(
+                f"Gazetteer for {lang!r} / {entity!r} is not configured — "
+                "add an absolute path under gazetteers › <lang> › <entity> in the registry."
+            )
+
         pth = Path(raw)
         if not pth.exists():
             raise FileNotFoundError(

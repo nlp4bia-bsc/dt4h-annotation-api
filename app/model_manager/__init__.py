@@ -82,7 +82,10 @@ class ModelManager:
 
         # --- gazetteers: always validate (they are user-supplied, never downloaded) ---
         for lang, entities in (registry.get("gazetteers") or {}).items():
-            for entity in (entities or {}):
+            for entity, raw_path in (entities or {}).items():
+                if raw_path is None:
+                    logger.debug("Skipping gazetteer %s/%s — path not configured.", lang, entity)
+                    continue
                 pending.append(
                     PendingResource(
                         resource="gazetteers",

@@ -10,6 +10,8 @@ A Flask REST API that chains **Named Entity Recognition (NER)**, **Named Entity 
 2. [Installation](#installation)
 3. [Configuration](#configuration)
 4. [Validation](#validation)
+   - [1. Download models](#1-download-models)
+   - [2. Pre-flight pipeline check](#2-pre-flight-pipeline-check)
 5. [Running the Server](#running-the-server)
 6. [API Reference](#api-reference)
    - [GET /](#get-)
@@ -85,7 +87,7 @@ vectorized_dbs:
 
 - **NER models** are per language and per entity type. The `negation` entry is required only when `negation=true` is used in requests.
 - **NEL model** is shared across all entity types within a language.
-- **Gazetteers** must be placed manually. Each must be a TSV file with at minimum a `term` column and a `code` column.
+- **Gazetteers** must be placed manually. Each must be a TSV file with at minimum a `term` column and a `code` column. Setting a gazetteer entry to `null` is safe — the model manager and pipeline pre-flight check will skip it rather than crash. Requests for an entity with a missing or unconfigured gazetteer will fail with a clear error listing all absent resources.
 - **Vector databases** are built automatically from the gazetteer + NEL model on the first request. Once built, the path is written back to the registry so subsequent startups skip the build step. To force a rebuild, set the relevant entry to `null` in the registry.
 - If a model already exists locally (e.g. pre-downloaded or manually placed), set `local_path` directly and leave `repo_id: null` — no download will be attempted.
 - Swapping the NEL model produces a new vector DB filename automatically, triggering a rebuild.
@@ -98,13 +100,32 @@ The API detects CUDA availability at startup and sets the device accordingly. No
 
 ## Validation
 
-Before hosting the service, run the standalone test script to verify that all models load correctly and the full pipeline produces expected outputs:
+### 1. Download models
+
+Run the model manager to download all NER/NEL models listed in the registry (those with `repo_id` set and `local_path: null`) and validate any configured gazetteers. Entries with `null` paths (e.g. unconfigured gazetteers or missing `repo_id`) are skipped with a warning rather than aborting.
+
+```bash
+uv run python -m app.model_manager
+```
+
+### 2. Pre-flight pipeline check
+
+After downloading models, run the standalone validation script to verify end-to-end pipeline correctness and pre-build any missing vector databases (GPU strongly preferred for this step):
 
 ```bash
 uv run test_init.py
 ```
 
-This also pre-builds any missing vector databases, which is recommended before the first real request (GPU strongly preferred for this step).
+If any required resource is absent — NER/NEL model not downloaded, gazetteer not configured, or vector DB not built — the script fails with a single `RuntimeError` listing **all** missing items at once so you can resolve them in one pass:
+
+```
+RuntimeError: Cannot start pipeline — 3 resource(s) unavailable:
+  • NER es/disease: not downloaded — run 'python -m app.model_manager'
+  • NEL es: not downloaded — run 'python -m app.model_manager'
+  • Vector DB es/disease: not built — run 'uv run test_init.py'
+```
+
+The same pre-flight check runs whenever a pipeline is first instantiated at inference time.
 
 ---
 

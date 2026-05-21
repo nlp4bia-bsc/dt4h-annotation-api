@@ -8,6 +8,57 @@ from app.src.negation.negation_utils import add_negation_uncertainty_attributes
 from app.utils.results_postprocessing import join_all_entities
 
 
+def _check_resources(
+    resolver: LocalResolver,
+    lang: str,
+    entities: list[str],
+    *,
+    need_ner: bool = False,
+    need_nel: bool = False,
+    need_vdb: bool = False,
+    negation: bool = False,
+) -> None:
+    """Validate all pipeline resources up-front; raise RuntimeError listing every missing item."""
+    missing = []
+
+    if need_ner:
+        for e in (entities + ["negation"] if negation else entities):
+            try:
+                _, repo_id = resolver.get_ner_path(lang, e)
+                if repo_id:
+                    missing.append(f"NER {lang}/{e}: not downloaded — run 'python -m app.model_manager'")
+            except Exception as exc:
+                missing.append(f"NER {lang}/{e}: {exc}")
+
+    if need_nel:
+        try:
+            _, repo_id = resolver.get_nel_path(lang)
+            if repo_id:
+                missing.append(f"NEL {lang}: not downloaded — run 'python -m app.model_manager'")
+        except Exception as exc:
+            missing.append(f"NEL {lang}: {exc}")
+
+    for e in entities:
+        try:
+            resolver.get_gaz_path(lang, e)
+        except Exception as exc:
+            missing.append(f"Gazetteer {lang}/{e}: {exc}")
+
+        if need_vdb:
+            try:
+                _, built = resolver.get_vector_db_path(lang, e)
+                if not built:
+                    missing.append(f"Vector DB {lang}/{e}: not built — run 'uv run test_init.py'")
+            except Exception as exc:
+                missing.append(f"Vector DB {lang}/{e}: {exc}")
+
+    if missing:
+        raise RuntimeError(
+            f"Cannot start pipeline — {len(missing)} resource(s) unavailable:\n"
+            + "\n".join(f"  • {m}" for m in missing)
+        )
+
+
 class AnnotationPipeline(Protocol):
     @abstractmethod
     def predict(self, texts: list[str]) -> list[list[dict]]:
@@ -89,6 +140,7 @@ class LookupPipeline(AnnotationPipeline):
 
     def __init__(self, lang: str, entities: list[str]):
         self.resolver = LocalResolver()
+        _check_resources(self.resolver, lang, entities)
         self.gaz_pths = [self.resolver.get_gaz_path(lang, e) for e in entities]
 
     def predict(self, texts: list[str]) -> list[list[dict]]:
@@ -111,6 +163,7 @@ class FuzzyMatchPipeline(AnnotationPipeline):
         self.agg_strat = agg_strat
 
         self.resolver = LocalResolver()
+        _check_resources(self.resolver, lang, entities, need_ner=True)
         self.gaz_pths = [self.resolver.get_gaz_path(lang, e) for e in entities]
         self.ner_pths = [self.resolver.get_ner_path(lang, e)[0] for e in entities]
 
@@ -131,6 +184,7 @@ class BM25OkapiPipeline(AnnotationPipeline):
         self.agg_strat = agg_strat
 
         self.resolver = LocalResolver()
+        _check_resources(self.resolver, lang, entities, need_ner=True)
         self.gaz_pths = [self.resolver.get_gaz_path(lang, e) for e in entities]
         self.ner_pths = [self.resolver.get_ner_path(lang, e)[0] for e in entities]
 
@@ -176,6 +230,7 @@ class BiencoderPipeline(AnnotationPipeline):
         self.ner_version = ner_version
 
         self.resolver = LocalResolver()
+        _check_resources(self.resolver, lang, entities, need_ner=True, need_nel=True, need_vdb=True, negation=negation)
         self.ner_paths = [self.resolver.get_ner_path(self.lang, e)[0] for e in (entities + ["negation"] if self.negation else entities)]
         self.nel_path = self.resolver.get_nel_path(self.lang)[0]
         self.gaz_paths = [self.resolver.get_gaz_path(self.lang, e) for e in entities]
