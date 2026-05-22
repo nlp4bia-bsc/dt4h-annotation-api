@@ -17,13 +17,13 @@ ner:
       local_path: null
   en:
     disease:
-      repo_id: BSC-NLP4BIA/DT4H_XLM-R_mtl_en-nl-sv_disease
+      repo_id: BSC-NLP4BIA/DT4H_XLM-R_stl_multilingual_disease
       local_path: null
     symptom:
-      repo_id: BSC-NLP4BIA/DT4H_XLM-R_mtl_en-nl-sv_symptom
+      repo_id: BSC-NLP4BIA/DT4H_XLM-R_stl_multilingual_symptom
       local_path: null
     procedure:
-      repo_id: BSC-NLP4BIA/DT4H_XLM-R_mtl_en-nl-sv_procedure
+      repo_id: BSC-NLP4BIA/DT4H_XLM-R_stl_multilingual_procedure
       local_path: null
     drug:
       repo_id: null
@@ -33,13 +33,13 @@ ner:
       local_path: null
   es:
     disease:
-      repo_id: BSC-NLP4BIA/DT4H_XLM-R_mtl_es-it-ro_disease
+      repo_id: BSC-NLP4BIA/DT4H_XLM-R_stl_multilingual_disease
       local_path: null
     symptom:
-      repo_id: BSC-NLP4BIA/DT4H_XLM-R_mtl_es-it-ro_symptom
+      repo_id: BSC-NLP4BIA/DT4H_XLM-R_stl_multilingual_symptom
       local_path: null
     procedure:
-      repo_id: BSC-NLP4BIA/DT4H_XLM-R_mtl_es-it-ro_procedure
+      repo_id: BSC-NLP4BIA/DT4H_XLM-R_stl_multilingual_procedure
       local_path: null
     drug:
       repo_id: null
@@ -49,13 +49,13 @@ ner:
       local_path: null
   it:
     disease:
-      repo_id: BSC-NLP4BIA/DT4H_XLM-R_mtl_es-it-ro_disease
+      repo_id: BSC-NLP4BIA/DT4H_XLM-R_stl_multilingual_disease
       local_path: null
     symptom:
-      repo_id: BSC-NLP4BIA/DT4H_XLM-R_mtl_es-it-ro_symptom
+      repo_id: BSC-NLP4BIA/DT4H_XLM-R_stl_multilingual_symptom
       local_path: null
     procedure:
-      repo_id: BSC-NLP4BIA/DT4H_XLM-R_mtl_es-it-ro_procedure
+      repo_id: BSC-NLP4BIA/DT4H_XLM-R_stl_multilingual_procedure
       local_path: null
     drug:
       repo_id: null
@@ -65,13 +65,13 @@ ner:
       local_path: null
   nl:
     disease:
-      repo_id: BSC-NLP4BIA/DT4H_XLM-R_mtl_en-nl-sv_disease
+      repo_id: BSC-NLP4BIA/DT4H_XLM-R_stl_multilingual_disease
       local_path: null
     symptom:
-      repo_id: BSC-NLP4BIA/DT4H_XLM-R_mtl_en-nl-sv_symptom
+      repo_id: BSC-NLP4BIA/DT4H_XLM-R_stl_multilingual_symptom
       local_path: null
     procedure:
-      repo_id: BSC-NLP4BIA/DT4H_XLM-R_mtl_en-nl-sv_procedure
+      repo_id: BSC-NLP4BIA/DT4H_XLM-R_stl_multilingual_procedure
       local_path: null
     drug:
       repo_id: null
@@ -81,13 +81,13 @@ ner:
       local_path: null
   ro:
     disease:
-      repo_id: BSC-NLP4BIA/DT4H_XLM-R_mtl_es-it-ro_disease
+      repo_id: BSC-NLP4BIA/DT4H_XLM-R_stl_multilingual_disease
       local_path: null
     symptom:
-      repo_id: BSC-NLP4BIA/DT4H_XLM-R_mtl_es-it-ro_symptom
+      repo_id: BSC-NLP4BIA/DT4H_XLM-R_stl_multilingual_symptom
       local_path: null
     procedure:
-      repo_id: BSC-NLP4BIA/DT4H_XLM-R_mtl_es-it-ro_procedure
+      repo_id: BSC-NLP4BIA/DT4H_XLM-R_stl_multilingual_procedure
       local_path: null
     drug:
       repo_id: null
@@ -97,13 +97,13 @@ ner:
       local_path: null
   sv:
     disease:
-      repo_id: BSC-NLP4BIA/DT4H_XLM-R_mtl_en-nl-sv_disease
+      repo_id: BSC-NLP4BIA/DT4H_XLM-R_stl_multilingual_disease
       local_path: null
     symptom:
-      repo_id: BSC-NLP4BIA/DT4H_XLM-R_mtl_en-nl-sv_symptom
+      repo_id: BSC-NLP4BIA/DT4H_XLM-R_stl_multilingual_symptom
       local_path: null
     procedure:
-      repo_id: BSC-NLP4BIA/DT4H_XLM-R_mtl_en-nl-sv_procedure
+      repo_id: BSC-NLP4BIA/DT4H_XLM-R_stl_multilingual_procedure
       local_path: null
     drug:
       repo_id: null

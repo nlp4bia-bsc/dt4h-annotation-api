@@ -92,7 +92,6 @@ class LocalResolver:
                 self.base_pth
                 / "local_models"
                 / "ner_models"
-                / lang
                 / entity
                 / repo_id.split("/")[-1]
             )
@@ -133,7 +132,6 @@ class LocalResolver:
                 self.base_pth
                 / "local_models"
                 / "nel_models"
-                / lang
                 / repo_id.split("/")[-1]
             )
             logger.info(

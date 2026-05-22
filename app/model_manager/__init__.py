@@ -229,6 +229,7 @@ class ModelManager:
 
         logger.info("Found %d resource(s) to process.", len(pending))
         errors: list[str] = []
+        downloaded_paths: set[Path] = set()
 
         for item in pending:
             label = self._label(item)
@@ -251,7 +252,11 @@ class ModelManager:
 
                 elif resource_type in ("ner", "nel"):
                     assert repo_id
-                    validated_path = self.downloader.download_hf(local_path, repo_id)
+                    if local_path in downloaded_paths:
+                        validated_path = str(local_path)
+                    else:
+                        validated_path = self.downloader.download_hf(local_path, repo_id)
+                        downloaded_paths.add(local_path)
 
                 elif resource_type == "vectorized_dbs":
                     assert item["task"]
