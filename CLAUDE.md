@@ -66,10 +66,12 @@ POST /annotate or /annotate_dir
 `app/config.py` points to the active registry YAML (`REGISTRY_PATH`) and resource root (`RESOURCES_PATH`). The current config uses `toy_registry.yaml` — copy and rename for production use.
 
 `LocalResolver` derives all on-disk paths from the registry:
-- NER models: `{RESOURCES_PATH}/local_models/ner_models/{lang}/{entity}/{model_name}/`
-- NEL models: `{RESOURCES_PATH}/local_models/nel_models/{lang}/{model_name}/`
+- NER models: `{RESOURCES_PATH}/local_models/ner_models/{entity}/{model_name}/`
+- NEL models: `{RESOURCES_PATH}/local_models/nel_models/{model_name}/`
 - Gazetteers: absolute paths specified directly in the registry (must be TSV with `term` + `code` columns)
 - Vector DBs: `{RESOURCES_PATH}/vectorized_dbs/{lang}/{entity}_{nel_model_name}.pt` — auto-built on first request; swapping the NEL model triggers a rebuild
+
+Models with the same `repo_id` across multiple languages share one on-disk copy. `ModelManager.sanitize()` downloads each unique `(repo_id, path)` pair once and writes the shared path back to all matching registry entries.
 
 When `local_path` is `null` in the registry, the resolver returns the target download path and a `repo_id`; the downloader then fetches from HuggingFace. Once downloaded, `local_path` is written back.
 
