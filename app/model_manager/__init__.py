@@ -13,7 +13,7 @@ Internal modules (not re-exported):
 Download rules (mirrors registry schema):
     gazetteers     – always validate; no repo_id needed
     ner / nel      – download when repo_id is set AND local_path is absent
-    vectorized_dbs – build when the registry value is null
+    vectorized_dbs – build when registry value is null AND gazetteer is configured AND NEL model is downloaded
 
 Usage
 -----
@@ -134,17 +134,35 @@ class ModelManager:
         for lang, tasks in (registry.get("vectorized_dbs") or {}).items():
             for task in (tasks or {}):
                 local_path, already_built = self.resolver.get_vector_db_path(lang, task)
-                if not already_built:
-                    pending.append(
-                        PendingResource(
-                            resource="vectorized_dbs",
-                            lang=lang,
-                            task=task,
-                            repo_id=None,
-                            local_path=local_path,
-                            registry_keys=("vectorized_dbs", lang, task),
-                        )
+                if already_built:
+                    continue
+
+                gaz_entry = (registry.get("gazetteers") or {}).get(lang, {}).get(task)
+                if not gaz_entry:
+                    logger.info(
+                        "[vectorized_dbs/%s/%s]  gazetteer not configured — skipping vector DB build",
+                        lang, task,
                     )
+                    continue
+
+                nel_cfg = (registry.get("nel") or {}).get(lang) or {}
+                if not nel_cfg.get("local_path"):
+                    logger.info(
+                        "[vectorized_dbs/%s/%s]  NEL model not yet downloaded — skipping vector DB build",
+                        lang, task,
+                    )
+                    continue
+
+                pending.append(
+                    PendingResource(
+                        resource="vectorized_dbs",
+                        lang=lang,
+                        task=task,
+                        repo_id=None,
+                        local_path=local_path,
+                        registry_keys=("vectorized_dbs", lang, task),
+                    )
+                )
 
         return pending
 
