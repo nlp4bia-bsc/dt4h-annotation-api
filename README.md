@@ -314,7 +314,7 @@ curl -X POST "http://localhost:5000/process_bulk?language=es&entities=disease,sy
         }
       }
     ]
-  }'
+  }' | python3 -m json.tool
 ```
 
 ### Bulk texts
@@ -335,7 +335,7 @@ curl -X POST "http://localhost:5000/process_bulk?language=es&entities=disease,sy
         "footer": {"patient_id": "P2", "admission_id": "A2", "text_path": "/data/doc2.txt"}
       }
     ]
-  }'
+  }' | python3 -m json.tool
 ```
 
 ### With negation detection
@@ -351,7 +351,7 @@ curl -X POST "http://localhost:5000/process_bulk?language=es&entities=disease,sy
         "footer": {"patient_id": "P1", "admission_id": "A1", "text_path": "/data/doc1.txt"}
       }
     ]
-  }'
+  }' | python3 -m json.tool
 ```
 
 Entities in a negated context will have `"negation": "yes"` and a non-zero `negation_confidence`.
