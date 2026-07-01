@@ -137,11 +137,21 @@ class ModelManager:
 
         # --- vectorized_dbs: build when registry value is null ---
         for lang, tasks in (registry.get("vectorized_dbs") or {}).items():
-            for task in (tasks or {}):
-                local_path, already_built = self.resolver.get_vector_db_path(lang, task)
-                if already_built:
+            for task, raw_val in (tasks or {}).items():
+                # Already registered path — validate it still exists on disk.
+                if raw_val is not None:
+                    try:
+                        self.resolver.get_vector_db_path(lang, task)
+                    except FileNotFoundError:
+                        logger.error(
+                            "[vectorized_dbs/%s/%s]  registered path no longer exists — "
+                            "delete the registry entry and rebuild",
+                            lang, task,
+                        )
                     continue
 
+                # raw_val is null → need to build. Check prerequisites before
+                # touching the resolver (which requires a resolvable NEL name).
                 gaz_entry = (registry.get("gazetteers") or {}).get(lang, {}).get(task)
                 if not gaz_entry:
                     logger.info(
@@ -156,6 +166,11 @@ class ModelManager:
                         "[vectorized_dbs/%s/%s]  NEL model not yet downloaded — skipping vector DB build",
                         lang, task,
                     )
+                    continue
+
+                # Prerequisites met — safe to resolve the target path.
+                local_path, already_built = self.resolver.get_vector_db_path(lang, task)
+                if already_built:
                     continue
 
                 pending.append(
