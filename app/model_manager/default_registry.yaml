@@ -1,139 +1,180 @@
 ner:
   cz:
     disease:
-      repo_id: BSC-NLP4BIA/DT4H_XLM-R_stl_multilingual_disease
+      repo_id: DT4H-IE/CardioBERTa.cs_CZ_DIS
       local_path: null
+      branch: 2025-05-21_17-07-55-f9ebb4f0
     symptom:
-      repo_id: BSC-NLP4BIA/DT4H_XLM-R_stl_multilingual_symptom
+      repo_id: DT4H-IE/CardioBERTa.cs_CZ_SYMP
       local_path: null
+      branch: 2025-05-31_10-26-59-671cb8be
     procedure:
-      repo_id: BSC-NLP4BIA/DT4H_XLM-R_stl_multilingual_procedure
+      repo_id: DT4H-IE/CardioBERTa.cs_CZ_PROC
       local_path: null
+      branch: 2025-05-29_15-36-50-0c8849c4
     drug:
+      repo_id: DT4H-IE/CardioBERTa.cs_CZ_MED
+      local_path: null
+      branch: 2025-05-19_09-37-48-406f4bef
+    negation:
       repo_id: null
       local_path: null
-    negation:
-      repo_id: null  # placeholder: no negation model available for Czech
-      local_path: null
+      branch: null
   en:
     disease:
-      repo_id: BSC-NLP4BIA/DT4H_XLM-R_stl_multilingual_disease
+      repo_id: DT4H-IE/CardioBERTa.en_EN_DIS
       local_path: null
+      branch: 2025-05-22_06-35-07-e6871b79
     symptom:
-      repo_id: BSC-NLP4BIA/DT4H_XLM-R_stl_multilingual_symptom
+      repo_id: DT4H-IE/CardioBERTa.en_EN_SYMP
       local_path: null
+      branch: 2025-05-30_08-26-25-7f6959d3
     procedure:
-      repo_id: BSC-NLP4BIA/DT4H_XLM-R_stl_multilingual_procedure
+      repo_id: DT4H-IE/CardioBERTa.en_EN_PROC
       local_path: null
+      branch: 2025-05-29_13-40-09-e02db4e1
     drug:
+      repo_id: DT4H-IE/CardioBERTa.en_EN_MED
+      local_path: null
+      branch: 2025-05-19_06-46-37-be605b94
+    negation:
       repo_id: null
       local_path: null
-    negation:
-      repo_id: null  # placeholder: no negation model available for English
-      local_path: null
+      branch: null
   es:
     disease:
-      repo_id: BSC-NLP4BIA/DT4H_XLM-R_stl_multilingual_disease
+      repo_id: DT4H-IE/CardioBERTa.es_ES_DIS
       local_path: null
+      branch: 2025-05-19_14-22-41-3fe3ca6a
     symptom:
-      repo_id: BSC-NLP4BIA/DT4H_XLM-R_stl_multilingual_symptom
+      repo_id: DT4H-IE/CardioBERTa.es_ES_SYMP
       local_path: null
+      branch: 2025-05-30_09-18-18-489e77a7
     procedure:
-      repo_id: BSC-NLP4BIA/DT4H_XLM-R_stl_multilingual_procedure
+      repo_id: DT4H-IE/CardioBERTa.es_ES_PROC
       local_path: null
+      branch: 2025-05-30_07-19-20-d1739566
     drug:
-      repo_id: null
+      repo_id: DT4H-IE/CardioBERTa.es_ES_MED
       local_path: null
+      branch: 2025-05-19_11-00-19-4d8e9c52
     negation:
       repo_id: BSC-NLP4BIA/negation-tagger
       local_path: null
+      branch: null
   it:
     disease:
-      repo_id: BSC-NLP4BIA/DT4H_XLM-R_stl_multilingual_disease
+      repo_id: DT4H-IE/CardioBERTa.it_IT_DIS
       local_path: null
+      branch: 2025-05-22_07-45-31-457174fc
     symptom:
-      repo_id: BSC-NLP4BIA/DT4H_XLM-R_stl_multilingual_symptom
+      repo_id: DT4H-IE/CardioBERTa.it_IT_SYMP
       local_path: null
+      branch: 2025-05-30_09-40-07-8025d1f5
     procedure:
-      repo_id: BSC-NLP4BIA/DT4H_XLM-R_stl_multilingual_procedure
+      repo_id: DT4H-IE/CardioBERTa.it_IT_PROC
       local_path: null
+      branch: 2025-05-29_14-05-33-56527641
     drug:
+      repo_id: DT4H-IE/CardioBERTa.it_IT_MED
+      local_path: null
+      branch: 2025-05-19_08-26-01-dcbf0f3b
+    negation:
       repo_id: null
       local_path: null
-    negation:
-      repo_id: null  # placeholder: no negation model available for Italian
-      local_path: null
+      branch: null
   nl:
     disease:
-      repo_id: BSC-NLP4BIA/DT4H_XLM-R_stl_multilingual_disease
+      repo_id: DT4H-IE/CardioBERTa.nl_clinical_NL_DIS
       local_path: null
+      branch: 2025-05-21_17-25-28-cdbfb7e8
     symptom:
-      repo_id: BSC-NLP4BIA/DT4H_XLM-R_stl_multilingual_symptom
+      repo_id: DT4H-IE/CardioBERTa.nl_clinical_NL_SYMP
       local_path: null
+      branch: 2025-05-31_10-21-51-eef03f14
     procedure:
-      repo_id: BSC-NLP4BIA/DT4H_XLM-R_stl_multilingual_procedure
+      repo_id: DT4H-IE/CardioBERTa.nl_clinical_NL_PROC
       local_path: null
+      branch: 2025-05-29_13-08-17-9c519819
     drug:
+      repo_id: DT4H-IE/CardioBERTa.nl_clinical_NL_MED
+      local_path: null
+      branch: 2025-05-19_12-14-22-ae118d15
+    negation:
       repo_id: null
       local_path: null
-    negation:
-      repo_id: null  # placeholder: no negation model available for Dutch
-      local_path: null
+      branch: null
   ro:
     disease:
-      repo_id: BSC-NLP4BIA/DT4H_XLM-R_stl_multilingual_disease
+      repo_id: DT4H-IE/CardioBERTa.ro_RO_DIS
       local_path: null
+      branch: 2025-05-20_10-11-53-81f5cf78
     symptom:
-      repo_id: BSC-NLP4BIA/DT4H_XLM-R_stl_multilingual_symptom
+      repo_id: DT4H-IE/CardioBERTa.ro_RO_SYMP
       local_path: null
+      branch: 2025-05-30_10-36-57-71887181
     procedure:
-      repo_id: BSC-NLP4BIA/DT4H_XLM-R_stl_multilingual_procedure
+      repo_id: DT4H-IE/CardioBERTa.ro_RO_PROC
       local_path: null
+      branch: 2025-05-30_07-15-53-f791f275
     drug:
+      repo_id: DT4H-IE/CardioBERTa.ro_RO_MED
+      local_path: null
+      branch: 2025-05-19_09-09-56-c0c818ad
+    negation:
       repo_id: null
       local_path: null
-    negation:
-      repo_id: null  # placeholder: no negation model available for Romanian
-      local_path: null
+      branch: null
   sv:
     disease:
-      repo_id: BSC-NLP4BIA/DT4H_XLM-R_stl_multilingual_disease
+      repo_id: DT4H-IE/CardioBERTa.sv_SV_DIS
       local_path: null
+      branch: 2025-05-21_16-19-57-235b6473
     symptom:
-      repo_id: BSC-NLP4BIA/DT4H_XLM-R_stl_multilingual_symptom
+      repo_id: DT4H-IE/CardioBERTa.sv_SV_SYMP
       local_path: null
+      branch: 2025-05-30_10-06-06-2e686ff4
     procedure:
-      repo_id: BSC-NLP4BIA/DT4H_XLM-R_stl_multilingual_procedure
+      repo_id: DT4H-IE/CardioBERTa.sv_SV_PROC
       local_path: null
+      branch: 2025-05-29_14-45-05-ad27a057
     drug:
+      repo_id: DT4H-IE/CardioBERTa.sv_SV_MED
+      local_path: null
+      branch: 2025-05-19_11-44-35-aab21eda
+    negation:
       repo_id: null
       local_path: null
-    negation:
-      repo_id: null  # placeholder: no negation model available for Swedish
-      local_path: null
-
+      branch: null
 nel:
   cz:
     repo_id: cambridgeltl/SapBERT-UMLS-2020AB-all-lang-from-XLMR-large
     local_path: null
+    branch: null
   en:
     repo_id: cambridgeltl/SapBERT-UMLS-2020AB-all-lang-from-XLMR-large
     local_path: null
+    branch: null
   es:
     repo_id: ICB-UMA/ClinLinker-KB-P
     local_path: null
+    branch: null
   it:
     repo_id: cambridgeltl/SapBERT-UMLS-2020AB-all-lang-from-XLMR-large
     local_path: null
+    branch: null
   nl:
     repo_id: cambridgeltl/SapBERT-UMLS-2020AB-all-lang-from-XLMR-large
     local_path: null
+    branch: null
   ro:
     repo_id: cambridgeltl/SapBERT-UMLS-2020AB-all-lang-from-XLMR-large
     local_path: null
+    branch: null
   sv:
     repo_id: cambridgeltl/SapBERT-UMLS-2020AB-all-lang-from-XLMR-large
     local_path: null
+    branch: null
 gazetteers:
   cz:
     disease: <path_to_gazetteer>
@@ -170,7 +211,6 @@ gazetteers:
     symptom: <path_to_gazetteer>
     procedure: <path_to_gazetteer>
     drug: <path_to_gazetteer>
-  
 vectorized_dbs:
   cz:
     disease: null

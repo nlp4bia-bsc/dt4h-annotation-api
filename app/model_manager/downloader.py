@@ -66,16 +66,18 @@ class ResourceDownloader:
     # HuggingFace models (NER / NEL)
     # ------------------------------------------------------------------
 
-    def download_hf(self, model_local_path: Path, repo_id: str) -> str:
+    def download_hf(self, model_local_path: Path, repo_id: str, branch: Optional[str] = None) -> str:
         """
         Download *repo_id* from HuggingFace Hub into *model_local_path*.
 
         The parent directory is created if it does not exist.
+        *branch* maps to ``snapshot_download``'s ``revision`` parameter; ``None``
+        uses the repository's default branch.
         Returns the local path as a ``str`` for registry persistence.
         """
         model_local_path.parent.mkdir(parents=True, exist_ok=True)
-        logger.info("Downloading %r → %s", repo_id, model_local_path)
-        snapshot_download(repo_id=repo_id, local_dir=model_local_path)
+        logger.info("Downloading %r (branch=%r) → %s", repo_id, branch, model_local_path)
+        snapshot_download(repo_id=repo_id, local_dir=model_local_path, revision=branch)
         logger.info("Download complete: %s", model_local_path)
         return str(model_local_path)
 

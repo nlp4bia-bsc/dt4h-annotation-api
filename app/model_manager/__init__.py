@@ -47,6 +47,7 @@ class PendingResource(TypedDict):
     lang: str
     task: str | None        # sub-task key, or None for nel entries
     repo_id: str | None     # None for gazetteers and vectorized_dbs
+    branch: str | None      # HF branch/revision override; None = default branch
     local_path: Path        # resolved target path on disk
     registry_keys: tuple    # full key path for update_registry
 
@@ -93,6 +94,7 @@ class ModelManager:
                         lang=lang,
                         task=entity,
                         repo_id=None,
+                        branch=None,
                         local_path=self.resolver.get_gaz_path(lang, entity),
                         registry_keys=("gazetteers", lang, entity),
                     )
@@ -110,6 +112,7 @@ class ModelManager:
                         lang=lang,
                         task=task,
                         repo_id=cfg["repo_id"],
+                        branch=cfg.get("branch"),
                         local_path=local_path,
                         registry_keys=("ner", lang, task),
                     )
@@ -126,6 +129,7 @@ class ModelManager:
                     lang=lang,
                     task=None,
                     repo_id=cfg["repo_id"],
+                    branch=cfg.get("branch"),
                     local_path=local_path,
                     registry_keys=("nel", lang),
                 )
@@ -160,6 +164,7 @@ class ModelManager:
                         lang=lang,
                         task=task,
                         repo_id=None,
+                        branch=None,
                         local_path=local_path,
                         registry_keys=("vectorized_dbs", lang, task),
                     )
@@ -240,6 +245,7 @@ class ModelManager:
             label = self._label(item)
             local_path: Path = item["local_path"]
             repo_id = item["repo_id"]
+            branch = item["branch"]
 
             logger.info(
                 "[%s]  %s",
@@ -260,7 +266,7 @@ class ModelManager:
                     if local_path in downloaded_paths:
                         validated_path = str(local_path)
                     else:
-                        validated_path = self.downloader.download_hf(local_path, repo_id)
+                        validated_path = self.downloader.download_hf(local_path, repo_id, branch)
                         downloaded_paths.add(local_path)
 
                 elif resource_type == "vectorized_dbs":
