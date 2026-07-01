@@ -6,9 +6,14 @@ from typing import Optional
 
 import yaml
 
-from app.config import REGISTRY_PATH, RESOURCES_PATH
+from app.config import REGISTRY_PATH, RESOURCES_PATH, REPO_ROOT
 
 logger = logging.getLogger(__name__)
+
+
+def _make_abs(raw: str) -> Path:
+    p = Path(raw)
+    return p if p.is_absolute() else REPO_ROOT / p
 
 
 class ModelNotFoundError(Exception):
@@ -101,7 +106,7 @@ class LocalResolver:
             )
             return local_path, repo_id
 
-        local_path = Path(pth)
+        local_path = _make_abs(pth)
         if not local_path.exists():
             raise FileNotFoundError(
                 f"NER model for {lang!r} / {entity!r} not found at {local_path!r} "
@@ -139,7 +144,7 @@ class LocalResolver:
             )
             return local_path, repo_id
 
-        local_path = Path(pth)
+        local_path = _make_abs(pth)
         if not local_path.exists():
             raise FileNotFoundError(
                 f"NEL model for {lang!r} not found at {local_path!r} "
@@ -169,7 +174,7 @@ class LocalResolver:
                 "add an absolute path under gazetteers › <lang> › <entity> in the registry."
             )
 
-        pth = Path(raw)
+        pth = _make_abs(raw)
         if not pth.exists():
             raise FileNotFoundError(
                 f"Gazetteer for {lang!r} / {entity!r} not found at {pth!r} "
@@ -233,7 +238,7 @@ class LocalResolver:
             )
             return target, False
 
-        pth = Path(raw)
+        pth = _make_abs(raw)
         if not pth.exists():
             raise FileNotFoundError(
                 f"Vector DB for {lang!r} / {entity!r} not found at {pth!r} "

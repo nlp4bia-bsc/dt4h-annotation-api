@@ -58,10 +58,10 @@ The registry maps languages and entity types to local model paths and gazetteer 
 ner:
   es:
     disease:
-      repo_id: BSC-NLP4BIA/bsc-bio-ehr-es-carmen-distemist
+      repo_id: BSC-NLP4BIA/DT4H_XLM-R_stl_multilingual_disease
       local_path: null   # will be populated after first download
-    symptoms:
-      repo_id: BSC-NLP4BIA/bsc-bio-ehr-es-carmen-symptemist
+    symptom:
+      repo_id: BSC-NLP4BIA/DT4H_XLM-R_stl_multilingual_symptom
       local_path: null
     negation:
       repo_id: BSC-NLP4BIA/negation-tagger
@@ -69,18 +69,18 @@ ner:
 
 nel:
   es:
-    repo_id: ICB-UMA/ClinLinker-KB-GP
+    repo_id: ICB-UMA/ClinLinker-KB-P
     local_path: null
 
 gazetteers:
   es:
     disease: /absolute/path/to/distemist_gazetteer.tsv
-    symptoms: /absolute/path/to/symptemist_gazetteer.tsv
+    symptom: /absolute/path/to/symptemist_gazetteer.tsv
 
 vectorized_dbs:
   es:
     disease: null   # built automatically on first run
-    symptoms: null
+    symptom: null
 ```
 
 **Key points:**
@@ -165,7 +165,7 @@ Annotate a batch of clinical texts. Designed for CogStack/NiFi: inference parame
 | Param | Required | Description |
 |---|---|---|
 | `language` | yes | Language code (e.g. `"es"`). |
-| `entities` | yes | Comma-separated entity types (e.g. `"disease,symptoms"`). Must match registry entries. |
+| `entities` | yes | Comma-separated entity types (e.g. `"disease,symptom"`). Must match registry entries. |
 | `negation` | no | `"true"` or `"false"` (default `"false"`). Enable negation/uncertainty detection. Requires a `negation` NER model in the registry for the given language. |
 
 #### Request body
@@ -300,7 +300,7 @@ curl http://localhost:5000/
 ### Single text
 
 ```bash
-curl -X POST "http://localhost:5000/process_bulk?language=es&entities=disease,symptoms&negation=false" \
+curl -X POST "http://localhost:5000/process_bulk?language=es&entities=disease,symptom&negation=false" \
   -H 'Content-Type: application/json' \
   -d '{
     "content": [
@@ -320,7 +320,7 @@ curl -X POST "http://localhost:5000/process_bulk?language=es&entities=disease,sy
 ### Bulk texts
 
 ```bash
-curl -X POST "http://localhost:5000/process_bulk?language=es&entities=disease,symptoms&negation=false" \
+curl -X POST "http://localhost:5000/process_bulk?language=es&entities=disease,symptom&negation=false" \
   -H 'Content-Type: application/json' \
   -d '{
     "content": [
@@ -341,7 +341,7 @@ curl -X POST "http://localhost:5000/process_bulk?language=es&entities=disease,sy
 ### With negation detection
 
 ```bash
-curl -X POST "http://localhost:5000/process_bulk?language=es&entities=disease,symptoms&negation=true" \
+curl -X POST "http://localhost:5000/process_bulk?language=es&entities=disease,symptom&negation=true" \
   -H 'Content-Type: application/json' \
   -d '{
     "content": [
@@ -379,7 +379,7 @@ The default port is `5000` and can be changed in `docker-compose.yml`.
 ## Architecture
 
 ```
-POST /process_bulk?language=es&entities=disease,symptoms&negation=false
+POST /process_bulk?language=es&entities=disease,symptom&negation=false
       │
       ▼
  Query param parsing (language, entities, negation)

@@ -29,6 +29,7 @@ import logging
 from pathlib import Path
 from typing import TypedDict
 
+from app.config import REPO_ROOT
 from .downloader import ResourceDownloader
 from .resolver import LocalResolver
 
@@ -191,7 +192,11 @@ class ModelManager:
             node = node[key]
 
         leaf_key = registry_keys[-1]
-        str_path = str(local_path)
+        _p = Path(local_path)
+        try:
+            str_path = str(_p.relative_to(REPO_ROOT))
+        except ValueError:
+            str_path = str(_p)
 
         if isinstance(node.get(leaf_key), dict):
             node[leaf_key]["local_path"] = str_path

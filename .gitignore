@@ -6,3 +6,4 @@ __pycache__/
 app/resources/*
 app/model_manager/registry.yaml
 app/config.py
+data/*
