@@ -10,7 +10,8 @@ For each language directory found in data/:
   3. Runs NER inference across all registered entity types (disease, symptom, etc.).
   4. Writes results/{lang}/raw/{stem}.tsv   — flat entity spans per document.
   5. Writes results/{lang}/formatted/{stem}.json — DT4H CDM v2 JSON per document.
-  6. Releases model memory before processing the next language.
+  6. Writes results/{lang}/{lang}.ann — all annotations across all files, sorted by filename then start span.
+  7. Releases model memory before processing the next language.
 """
 
 import argparse
@@ -23,7 +24,8 @@ from pathlib import Path
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s  %(message)s")
 log = logging.getLogger(__name__)
-
+# tokenization false alarm since preprococessing handles model size overflow
+logging.getLogger("transformers.tokenization_utils_base").setLevel(logging.ERROR)
 
 def _check_registry(resolver, lang: str, entity_filter: list[str] | None = None) -> list[Path] | None:
     """
@@ -59,6 +61,16 @@ def _check_registry(resolver, lang: str, entity_filter: list[str] | None = None)
         model_paths.append(path)
 
     return model_paths
+
+
+def _write_ann(path: Path, rows: list[tuple[str, dict]]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    sorted_rows = sorted(rows, key=lambda r: (r[0], r[1]["start"]))
+    with open(path, "w", newline="", encoding="utf-8") as fh:
+        writer = csv.writer(fh, delimiter="\t")
+        writer.writerow(["filename", "ner_class", "start", "end", "span", "ner_score"])
+        for filename, ann in sorted_rows:
+            writer.writerow([filename, ann["ner_class"], ann["start"], ann["end"], ann["span"], ann["ner_score"]])
 
 
 def _write_tsv(path: Path, annotations: list[dict]) -> None:
@@ -160,11 +172,15 @@ def main() -> None:
         raw = encoder_inference(texts=texts, ner_models=model_paths, version=2)
         flat = join_all_entities(raw)  # [n_texts][n_entities]
 
+        ann_rows: list[tuple[str, dict]] = []
         for txt_file, text, annotations in zip(txt_files, texts, flat):
             stem = txt_file.stem
             _write_tsv(args.output / lang / "raw" / f"{stem}.tsv", annotations)
             _write_json(args.output / lang / "formatted" / f"{stem}.json", text, annotations, formatter)
+            for ann in annotations:
+                ann_rows.append((txt_file.name, ann))
 
+        _write_ann(args.output / lang / f"{lang}.ann", ann_rows)
         log.info("[%s] Done. Written to %s/%s/", lang, args.output, lang)
 
         del raw, flat, texts
