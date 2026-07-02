@@ -63,7 +63,7 @@ def _check_registry(resolver, lang: str, entity_filter: list[str] | None = None)
     return model_paths
 
 
-def _write_ann(path: Path, rows: list[tuple[str, dict]]) -> None:
+def _write_tsv(path: Path, rows: list[tuple[str, dict]]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     sorted_rows = sorted(rows, key=lambda r: (r[0], r[1]["start"]))
     with open(path, "w", newline="", encoding="utf-8") as fh:
@@ -73,23 +73,19 @@ def _write_ann(path: Path, rows: list[tuple[str, dict]]) -> None:
             writer.writerow([filename, ann["ner_class"], ann["start"], ann["end"], ann["span"], ann["ner_score"]])
 
 
-def _write_tsv(path: Path, annotations: list[dict]) -> None:
+def _write_ann(path: Path, annotations: list[dict]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "w", newline="", encoding="utf-8") as fh:
-        writer = csv.DictWriter(
-            fh,
-            fieldnames=["ner_class", "start", "end", "span", "ner_score"],
-            delimiter="\t",
-        )
-        writer.writeheader()
+        writer = csv.writer(fh, delimiter="\t")
+        
         for ann in annotations:
-            writer.writerow({
-                "ner_class": ann["ner_class"],
-                "start":     ann["start"],
-                "end":       ann["end"],
-                "span":      ann["span"],
-                "ner_score": ann["ner_score"],
-            })
+            # Just pass the values as a list in the order you want them
+            writer.writerow([
+                ann["ner_class"],
+                ann["start"],
+                ann["end"],
+                ann["span"],
+            ])
 
 
 def _write_json(path: Path, text: str, annotations: list[dict], formatter) -> None:
@@ -188,14 +184,14 @@ def main() -> None:
         ann_rows: list[tuple[str, dict]] = []
         for txt_file, text, annotations in zip(txt_files, texts, flat):
             stem = txt_file.stem
-            _write_tsv(args.output / lang / "raw" / f"{stem}.ann", annotations)
+            _write_ann(args.output / lang / "raw" / f"{stem}.ann", annotations)
             _write_json(args.output / lang / "formatted" / f"{stem}.json", text, annotations, formatter)
             log.info("[%s]   %s → %d annotation(s)", lang, txt_file.name, len(annotations))
             for ann in annotations:
-                ann_rows.append((txt_file.name, ann))
+                ann_rows.append((stem, ann))
 
         tsv_path = args.output / lang / f"{lang}.tsv"
-        _write_ann(tsv_path, ann_rows)
+        _write_tsv(tsv_path, ann_rows)
         log.info("[%s] Combined TSV → %s", lang, tsv_path)
         log.info("[%s] Done.", lang)
 
