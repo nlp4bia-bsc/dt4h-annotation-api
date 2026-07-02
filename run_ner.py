@@ -8,9 +8,9 @@ For each language directory found in data/:
   1. Checks the registry: all NER models must have a local_path (i.e. downloaded).
   2. Reads all .txt files from data/{lang}/.
   3. Runs NER inference across all registered entity types (disease, symptom, etc.).
-  4. Writes results/{lang}/raw/{stem}.tsv   — flat entity spans per document.
+  4. Writes results/{lang}/raw/{stem}.ann   — flat entity spans per document.
   5. Writes results/{lang}/formatted/{stem}.json — DT4H CDM v2 JSON per document.
-  6. Writes results/{lang}/{lang}.ann — all annotations across all files, sorted by filename then start span.
+  6. Writes results/{lang}/{lang}.tsv — all annotations across all files, sorted by filename then start span.
   7. Releases model memory before processing the next language.
 """
 
@@ -22,7 +22,7 @@ import logging
 import sys
 from pathlib import Path
 
-logging.basicConfig(level=logging.INFO, format="%(levelname)s  %(message)s")
+logging.basicConfig(level=logging.INFO, format="%(asctime)s  %(levelname)-8s  %(message)s", datefmt="%H:%M:%S")
 log = logging.getLogger(__name__)
 # tokenization false alarm since preprococessing handles model size overflow
 logging.getLogger("transformers.tokenization_utils_base").setLevel(logging.ERROR)
@@ -138,6 +138,11 @@ def main() -> None:
     except ImportError:
         _has_cuda = False
 
+    log.info("Input : %s", args.input.resolve())
+    log.info("Output: %s", args.output.resolve())
+    if args.entities:
+        log.info("Entity filter: %s", ", ".join(args.entities))
+
     resolver = LocalResolver()
     formatter = Dt4hFormatter()
 
@@ -153,41 +158,53 @@ def main() -> None:
         log.error("No language directories found under %s.", args.input)
         sys.exit(1)
 
+    log.info("Languages to process: %s", ", ".join(d.name for d in lang_dirs))
+
     for lang_dir in lang_dirs:
         lang = lang_dir.name
-        log.info("=== %s ===", lang)
+        log.info("")
+        log.info("━━━  %s  ━━━", lang.upper())
 
         model_paths = _check_registry(resolver, lang, entity_filter=args.entities)
         if model_paths is None:
             continue
+        log.info("[%s] Models loaded: %d", lang, len(model_paths))
 
         txt_files = sorted(lang_dir.glob("*.txt"))
         if not txt_files:
             log.warning("[%s] No .txt files found — skip.", lang)
             continue
+        log.info("[%s] Input files : %d", lang, len(txt_files))
 
         texts = [f.read_text(encoding="utf-8") for f in txt_files]
-        log.info("[%s] Running NER on %d file(s) with %d model(s)...", lang, len(texts), len(model_paths))
+        log.info("[%s] Running NER inference...", lang)
 
         raw = encoder_inference(texts=texts, ner_models=model_paths, version=2)
         flat = join_all_entities(raw)  # [n_texts][n_entities]
 
+        total_ann = sum(len(a) for a in flat)
+        log.info("[%s] Inference done — %d annotation(s) found", lang, total_ann)
+
         ann_rows: list[tuple[str, dict]] = []
         for txt_file, text, annotations in zip(txt_files, texts, flat):
             stem = txt_file.stem
-            _write_tsv(args.output / lang / "raw" / f"{stem}.tsv", annotations)
+            _write_tsv(args.output / lang / "raw" / f"{stem}.ann", annotations)
             _write_json(args.output / lang / "formatted" / f"{stem}.json", text, annotations, formatter)
+            log.info("[%s]   %s → %d annotation(s)", lang, txt_file.name, len(annotations))
             for ann in annotations:
                 ann_rows.append((txt_file.name, ann))
 
-        _write_ann(args.output / lang / f"{lang}.ann", ann_rows)
-        log.info("[%s] Done. Written to %s/%s/", lang, args.output, lang)
+        tsv_path = args.output / lang / f"{lang}.tsv"
+        _write_ann(tsv_path, ann_rows)
+        log.info("[%s] Combined TSV → %s", lang, tsv_path)
+        log.info("[%s] Done.", lang)
 
         del raw, flat, texts
         gc.collect()
         if _has_cuda:
             torch.cuda.empty_cache()
 
+    log.info("")
     log.info("All languages processed.")
 
 
