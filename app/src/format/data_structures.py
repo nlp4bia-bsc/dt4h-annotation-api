@@ -9,7 +9,6 @@ RecordFormat = Literal["txt", "PDF", "XML", "json", "docx"]
 CharacterEncoding = Literal["ASCII", "UTF-8", "UTF-16", "UTF-32", "No encoding", "Unknown"]
 ReportLanguage = Literal["en", "nl", "es", "it", "cs", "ro", "sv", "ca"]
 Deidentified = Literal["yes", "no"]
-ConceptClass = Literal["symptom", "disorder/disease", "procedure", "medication"] # Literal["symptom", "disorder/disease", "procedure", "medication", "cardiology entity", "other"]
 NerComponentType = Literal["dictionary lookup", "transformer", "other"]
 NelComponentType = Literal["lexical similarity", "transformer", "other"]
 ControlledVocabNamespace = Literal["UMLS", "SNOMED CT", "ICD10", "MedDRA", "ICD9", "DT4H", "HPO", "LOINC", "ISO", "GeoNames", "MeSH", "ESCO", "ATC", "ICPC", "other", "none"]
@@ -46,7 +45,7 @@ class RecordMetadata(BaseModel):
 
 
 class Annotation(BaseModel):
-    concept_class:                              Optional[ConceptClass] = None
+    concept_class:                              Optional[str] = None
     start_offset:                               Optional[int] = None
     end_offset:                                 Optional[int] = None
     mention_string:                             Optional[str] = None

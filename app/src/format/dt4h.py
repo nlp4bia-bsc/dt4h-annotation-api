@@ -12,8 +12,7 @@ The table below shows how raw pipeline fields map to CDM v2 fields:
 +----------------------+------------------------------------+----------------------------------+
 | Raw field            | CDM v2 field                       | Notes                            |
 +======================+====================================+==================================+
-| ``ner_class``        | ``concept_class``                  | Spanish labels mapped to English |
-|                      |                                    | literals (see ``_NER_CLASS_MAP``)|
+| ``ner_class``        | ``concept_class``                  |                                  |
 +----------------------+------------------------------------+----------------------------------+
 | ``start``            | ``start_offset``                   |                                  |
 +----------------------+------------------------------------+----------------------------------+
@@ -50,21 +49,6 @@ from app.src.format.data_structures import (
     NlpServiceInfo,
     RecordMetadata,
 )
-
-# ---------------------------------------------------------------------------
-# Internal constants
-# ---------------------------------------------------------------------------
-
-# Maps Spanish NER labels produced by the pipeline to the CDM concept_class
-# literals.  Labels not present here are lower-cased and passed through as-is,
-# which handles already-English labels such as "procedure" or "medication".
-_NER_CLASS_MAP: dict[str, str] = {
-    "ENFERMEDAD": "disorder/disease",
-    "SINTOMA": "symptom",
-    "PROCEDIMIENTO": "procedure",
-    "MEDICAMENTO": "medication",
-}
-
 
 # ---------------------------------------------------------------------------
 # Formatter
@@ -199,11 +183,8 @@ class Dt4hFormatter(DataFormatter):
             If any expected key is absent from ``ann``.
         """
         try:
-            raw_class = ann["ner_class"]
-            concept_class = _NER_CLASS_MAP.get(raw_class, raw_class.lower())
-
             return {
-                "concept_class":        concept_class,
+                "concept_class":        ann["ner_class"],
                 "start_offset":         ann["start"],
                 "end_offset":           ann["end"],
                 "mention_string":       ann["span"],
