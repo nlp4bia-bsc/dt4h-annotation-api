@@ -68,7 +68,7 @@ def _write_tsv(path: Path, rows: list[tuple[str, dict]]) -> None:
     sorted_rows = sorted(rows, key=lambda r: (r[0], r[1]["start"]))
     with open(path, "w", newline="", encoding="utf-8") as fh:
         writer = csv.writer(fh, delimiter="\t")
-        writer.writerow(["filename", "ner_class", "start", "end", "span", "ner_score"])
+        writer.writerow(["filename", "label", "start", "end", "span", "ner_score"])
         for filename, ann in sorted_rows:
             writer.writerow([filename, ann["ner_class"], ann["start"], ann["end"], ann["span"], ann["ner_score"]])
 
