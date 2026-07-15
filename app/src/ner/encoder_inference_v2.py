@@ -60,23 +60,15 @@ class NerModel:
             stride=256,
         )
 
-        # Compute the effective max token length the model can handle
+        # safe_max_length is the hard token budget per chunk INCLUDING special
+        # tokens (CLS/SEP), so it matches exactly what the pipeline will count.
         tokenizer_max = getattr(self.pipe.tokenizer, "model_max_length", 512)
         model_max = getattr(self.pipe.model.config, "max_position_embeddings", 512)
-        special_tokens_getter = getattr(self.pipe.tokenizer, "num_special_tokens_to_add", lambda pair=False: 2 if pair else 1)
         if not isinstance(tokenizer_max, int) or tokenizer_max <= 0 or tokenizer_max > 1_000_000:
             tokenizer_max = 512
         if not isinstance(model_max, int) or model_max <= 0 or model_max > 1_000_000:
             model_max = 512
-
-        # Reserve at least 4 positions: 2 for CLS/SEP and 2 safety margin for
-        # BPE re-tokenization differences between pre-chunking and pipeline.
-        n_special = max(4, special_tokens_getter(pair=False))
-        self.safe_max_length = min(tokenizer_max, model_max) - n_special
-
-        # Pin the tokenizer's model_max_length to our computed safe limit so the
-        # pipeline's built-in truncation+stride kicks in as a fallback for any
-        # chunk that re-tokenizes slightly longer than our pre-chunking estimate.
+        self.safe_max_length = min(tokenizer_max, model_max)
         self.pipe.tokenizer.model_max_length = self.safe_max_length
 
     def _predict_chunks(self, text: str, filename: str, batch_size: int) -> list[dict]:

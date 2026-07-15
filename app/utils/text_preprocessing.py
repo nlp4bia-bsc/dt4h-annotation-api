@@ -75,6 +75,9 @@ def _split_sentence_into_chunks(
     Split a single *sentence* into one or more token-safe chunks that fit within
     *max_length* tokens, preserving character offsets relative to *sentence*.
 
+    *max_length* is the total token budget **including** special tokens (CLS/SEP),
+    matching exactly what the pipeline will count when it re-tokenizes each chunk.
+
     This is necessary because some sentences may exceed the model's maximum
     sequence length. Chunks are produced greedily (no overlap), using the
     tokenizer's own offset mapping to compute character boundaries.
@@ -89,9 +92,17 @@ def _split_sentence_into_chunks(
     if not sentence or not sentence.strip():
         return []
 
-    # Leave 2 positions for special tokens (e.g. [CLS] / [SEP])
-    safe_len = max(8, max_length - 2)
+    # Tokenize WITH special tokens so the length count matches what the pipeline
+    # will see, eliminating any guesswork about how many special tokens to reserve.
+    enc_full = tokenizer(sentence, add_special_tokens=True, truncation=False)
+    n_total = len(enc_full["input_ids"])
 
+    # Sentence already fits — return as a single chunk
+    if n_total <= max_length:
+        return [{"text": sentence, "start": 0, "end": len(sentence)}]
+
+    # Need to split: use add_special_tokens=False to get clean content offsets,
+    # then derive the exact content budget from the already-measured n_special.
     enc = tokenizer(
         sentence,
         add_special_tokens=False,
@@ -101,14 +112,13 @@ def _split_sentence_into_chunks(
     input_ids = enc["input_ids"]
     offsets = enc["offset_mapping"]
 
-    # Sentence already fits — return as a single chunk
-    if len(input_ids) <= safe_len:
-        return [{"text": sentence, "start": 0, "end": len(sentence)}]
+    n_special = n_total - len(input_ids)
+    safe_content_len = max(8, max_length - n_special)
 
     chunks = []
     start_tok = 0
     while start_tok < len(input_ids):
-        end_tok = min(start_tok + safe_len, len(input_ids))
+        end_tok = min(start_tok + safe_content_len, len(input_ids))
         char_start = offsets[start_tok][0]
         char_end = offsets[end_tok - 1][1]
         if char_end > char_start:
