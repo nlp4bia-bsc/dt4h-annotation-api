@@ -7,35 +7,47 @@ validating every field against the Pydantic models defined in
 
 Field mapping
 -------------
-The table below shows how raw pipeline fields map to CDM v2 fields:
+The table below shows how raw pipeline fields map to CDM fields:
 
-+----------------------+------------------------------------+----------------------------------+
-| Raw field            | CDM v2 field                       | Notes                            |
-+======================+====================================+==================================+
-| ``ner_class``        | ``concept_class``                  |                                  |
-+----------------------+------------------------------------+----------------------------------+
-| ``start``            | ``start_offset``                   |                                  |
-+----------------------+------------------------------------+----------------------------------+
-| ``end``              | ``end_offset``                     |                                  |
-+----------------------+------------------------------------+----------------------------------+
-| ``span``             | ``mention_string``                 |                                  |
-+----------------------+------------------------------------+----------------------------------+
-| ``ner_score``        | ``extraction_confidence``          |                                  |
-+----------------------+------------------------------------+----------------------------------+
-| ``term``             | ``concept_str``                    |                                  |
-+----------------------+------------------------------------+----------------------------------+
-| ``code``             | ``concept_code``                   |                                  |
-+----------------------+------------------------------------+----------------------------------+
-| ``nel_score``        | ``concept_confidence``             |                                  |
-+----------------------+------------------------------------+----------------------------------+
-| ``is_negated``       | ``negation``                       | bool → ``"yes"`` / ``"no"``      |
-+----------------------+------------------------------------+----------------------------------+
-| ``negation_score``   | ``negation_confidence``            |                                  |
-+----------------------+------------------------------------+----------------------------------+
-| ``is_uncertain``     | ``uncertainty``                    | bool → ``"yes"`` / ``"no"``      |
-+----------------------+------------------------------------+----------------------------------+
-| ``uncertainty_score``| ``uncertainty_confidence``         |                                  |
-+----------------------+------------------------------------+----------------------------------+
++----------------------+---------------------------------------------------+----------------------------------+
+| Raw field            | CDM field                                         | Notes                            |
++======================+===================================================+==================================+
+| ``ner_class``        | ``concept_class``                                 | passed through verbatim          |
++----------------------+---------------------------------------------------+----------------------------------+
+| ``start``            | ``start_offset``                                  |                                  |
++----------------------+---------------------------------------------------+----------------------------------+
+| ``end``              | ``end_offset``                                    |                                  |
++----------------------+---------------------------------------------------+----------------------------------+
+| ``span``             | ``concept_mention_string``                        |                                  |
++----------------------+---------------------------------------------------+----------------------------------+
+| ``ner_score``        | ``concept_confidence``                            | see "Confidence" below           |
++----------------------+---------------------------------------------------+----------------------------------+
+| ``code``             | ``controlled_vocabulary_concept_identifier``      | absent for NER-only pipelines    |
++----------------------+---------------------------------------------------+----------------------------------+
+| ``term``             | ``controlled_vocabulary_concept_official_term``   | absent for NER-only pipelines    |
++----------------------+---------------------------------------------------+----------------------------------+
+| ``is_negated``       | ``negation``                                      | bool → ``"yes"`` / ``"no"``      |
++----------------------+---------------------------------------------------+----------------------------------+
+| ``negation_score``   | ``negation_confidence``                           |                                  |
++----------------------+---------------------------------------------------+----------------------------------+
+
+Confidence
+----------
+The CDM defines a single confidence slot per annotation, ``concept_confidence``,
+positioned immediately before the ``ner_component_*`` fields.  It therefore
+carries the **NER extraction confidence**.  ``nel_score`` has no CDM field of its
+own and is not serialised; see ``docs/cdm_open_questions.md``.
+
+Not assessed vs. assessed-negative
+----------------------------------
+``negation`` and ``negation_confidence`` are emitted as ``null`` when the raw
+annotation carries no negation keys at all — i.e. when the negation model was
+not run.  Only a pipeline that actually assessed the entity emits ``"no"``.
+Reporting ``"no"`` for an unassessed entity would state a clinical finding the
+pipeline never made.
+
+``is_uncertain`` / ``uncertainty_score`` are produced by the negation stage but
+have no CDM field; they survive in ``PassthroughFormatter`` output only.
 
 Footer fields are mapped directly onto ``RecordMetadata`` using its declared
 field names; unknown footer keys are silently ignored.
@@ -165,7 +177,11 @@ class Dt4hFormatter(DataFormatter):
 
     @staticmethod
     def _rename_annotation(ann: dict) -> dict:
-        """Convert a single raw annotation dict to CDM v2 field names.
+        """Convert a single raw annotation dict to CDM field names.
+
+        Only the five NER fields are required.  Linking and negation fields are
+        optional so that NER-only pipelines (see ``run_ner.py``) serialise
+        without having to stub them out; anything absent becomes ``null``.
 
         Parameters
         ----------
@@ -175,27 +191,31 @@ class Dt4hFormatter(DataFormatter):
         Returns
         -------
         dict
-            The same data with CDM v2 field names.
+            The same data with CDM field names.
 
         Raises
         ------
         ValueError
-            If any expected key is absent from ``ann``.
+            If one of the required NER fields is absent from ``ann``.
         """
         try:
-            return {
-                "concept_class":        ann["ner_class"],
-                "start_offset":         ann["start"],
-                "end_offset":           ann["end"],
-                "mention_string":       ann["span"],
-                "extraction_confidence":ann["ner_score"],
-                "concept_str":          ann["term"],
-                "concept_code":         ann["code"],
-                "concept_confidence":   ann["nel_score"],
-                "negation":             "yes" if ann.get("is_negated", False) else "no",
-                "negation_confidence":  ann.get("negation_score", 0.0),
-                "uncertainty":          "yes" if ann.get("is_uncertain", False) else "no",
-                "uncertainty_confidence":ann.get("uncertainty_score", 0.0),
+            renamed = {
+                "concept_class":            ann["ner_class"],
+                "start_offset":             ann["start"],
+                "end_offset":               ann["end"],
+                "concept_mention_string":   ann["span"],
+                "concept_confidence":       ann["ner_score"],
             }
         except KeyError as exc:
             raise ValueError(f"Missing expected annotation field: {exc}") from exc
+
+        # --- Linking (absent for NER-only pipelines) ---
+        renamed["controlled_vocabulary_concept_identifier"] = ann.get("code")
+        renamed["controlled_vocabulary_concept_official_term"] = ann.get("term")
+
+        # --- Negation (absent when the negation model was not run) ---
+        if "is_negated" in ann:
+            renamed["negation"] = "yes" if ann["is_negated"] else "no"
+            renamed["negation_confidence"] = ann.get("negation_score")
+
+        return renamed

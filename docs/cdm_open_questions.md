@@ -1,0 +1,129 @@
+# CDM — open questions and deferred work
+
+Decisions still outstanding after the move to CDM-JSON input in `run_ner.py`.
+Each entry states the current behaviour, so nothing here is silently broken —
+it is behaviour we chose knowing it may change.
+
+---
+
+## 1. `dt4h_concept_identifier` — unassigned
+
+**Status:** pending a decision from the project side.
+
+The CDM declares `dt4h_concept_identifier` on every annotation. Nothing in this
+repository populates it, and no rule has been supplied for deriving it.
+
+**Current behaviour:** always emitted as `null`.
+
+---
+
+## 2. NEL confidence has no CDM field
+
+**Status:** structural gap in the CDM, needs raising with the CDM owners.
+
+The CDM defines exactly one confidence slot per annotation,
+`concept_confidence`, positioned immediately before `ner_component_type` /
+`ner_component_version`. Its placement indicates it is the *extraction*
+confidence, so that is what we put there.
+
+That leaves the entity-linking score with nowhere to go. Before the CDM
+realignment this repository emitted both — `extraction_confidence` for the NER
+score and `concept_confidence` for the NEL score — but `extraction_confidence`
+is not a CDM field and was removed.
+
+**Current behaviour:** `concept_confidence` carries the NER score. `nel_score`
+is computed by the biencoder/BM25/fuzzy pipelines and then dropped during CDM
+serialisation. It survives in `PassthroughFormatter` output.
+
+**Options when this is picked up:** add a CDM field for linking confidence; or
+overload `concept_confidence` depending on whether a NEL stage ran (rejected —
+one field cannot carry two different measurements); or agree that linking
+confidence is out of scope for the CDM.
+
+---
+
+## 3. Uncertainty detection is not representable
+
+**Status:** structural gap in the CDM.
+
+`app/src/negation/negation_utils.py` produces `is_uncertain` and
+`uncertainty_score` alongside negation, driven by the `UNC`/`USCO` spans from
+the negation tagger. The CDM has `negation` / `negation_confidence` but no
+uncertainty counterpart, so half of what the negation model produces cannot be
+reported.
+
+`qualifier_negation` and `qualifier_temporal` exist in the CDM and are currently
+unpopulated — one of them may be the intended home for this, but that is a
+guess, not a mapping.
+
+**Current behaviour:** uncertainty is computed and then dropped during CDM
+serialisation. It survives in `PassthroughFormatter` output.
+
+---
+
+## 4. `concept_class` is whatever the model emits
+
+**Status:** deliberate, pending confirmation that model labels are CDM-conformant.
+
+`concept_class` is populated verbatim from the NER model's own label
+(`ner_class`, read from the checkpoint's `id2label`). The models are produced
+within the same project as the CDM, so their labels are expected to already be
+the CDM values: `symptom`, `disorder/disease`, `procedure`, `medication`,
+`cardiology entity`, `other`.
+
+This was chosen over mapping from the registry entity key
+(`disease` / `symptom` / `procedure` / `drug`), which would have been
+independent of how any checkpoint was labelled.
+
+**Current behaviour:** the label is passed through unchanged. Any value outside
+the CDM set logs a warning naming the offending value and the document is still
+processed. If those warnings appear in a real run, the fix is a mapping table in
+`Dt4hFormatter._rename_annotation`.
+
+**Watch for:** the registry registers an entity type named `drug`, whereas the
+CDM value is `medication`. If the `*_MED` checkpoints emit `drug` or `MED`, a
+mapping is required.
+
+---
+
+## 5. `run_ner.py` performs no entity linking
+
+**Status:** deferred by decision; JSON input was the priority.
+
+`run_ner.py` runs NER only. Every linking field in its output is therefore
+`null`: `controlled_vocabulary_concept_identifier`,
+`controlled_vocabulary_concept_official_term`,
+`controlled_vocabulary_namespace`, `controlled_vocabulary_version`,
+`controlled_vocabulary_source`, `nel_component_type`, `nel_component_version`.
+
+Adding a NEL stage requires a built vector database per language and entity
+type, which is a heavier setup step than the script currently assumes.
+
+---
+
+## 6. Controlled-vocabulary namespace is not recorded
+
+**Status:** blocked on per-gazetteer metadata.
+
+`controlled_vocabulary_namespace` should say which terminology a code belongs to
+(`SNOMED CT`, `ICD10`, …). Gazetteers are registered in the registry as bare TSV
+paths with `term` and `code` columns and carry no indication of their
+terminology, and they are not all the same one.
+
+**Current behaviour:** always `null`.
+
+**Likely fix:** add a `namespace` (and `version`) key beside each gazetteer path
+in the registry, and thread it through `LocalResolver` into the NEL stage.
+
+---
+
+## 7. `.txt`-only input is no longer supported
+
+**Status:** intentional breaking change.
+
+`run_ner.py` previously globbed `data/{lang}/*.txt` and annotated every file it
+found, with empty record metadata. It now globs `data/{lang}/*.json` and reads
+`.txt` files only as the sidecar of a CDM JSON document.
+
+Supporting both was rejected: consumers who need the old behaviour should pin
+the previous version rather than have the script carry two input contracts.

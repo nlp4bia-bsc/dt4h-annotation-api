@@ -19,8 +19,9 @@ A Flask REST API that chains **Named Entity Recognition (NER)**, **Named Entity 
    - [POST /sync_models](#post-sync_models)
 7. [Response Schema](#response-schema)
 8. [Examples](#examples)
-9. [Docker](#docker)
-10. [Architecture](#architecture)
+9. [Batch Processing (`run_ner.py`)](#batch-processing-run_nerpy)
+10. [Docker](#docker)
+11. [Architecture](#architecture)
 
 ---
 
@@ -47,8 +48,20 @@ All model and resource paths are managed through a **registry YAML file**. The p
 ```python
 # app/config.py
 REGISTRY_PATH = "app/model_manager/registry.yaml"
-RESOURCES_PATH = "app/model_manager/resources"
+RESOURCES_PATH = "app/resources"
 ```
+
+Only `default_registry.yaml` is committed — `registry.yaml` is gitignored, since it
+gets rewritten with local paths as models are downloaded. Create it before the
+first run:
+
+```bash
+cp app/model_manager/default_registry.yaml app/model_manager/registry.yaml
+```
+
+If it is missing, `LocalResolver` logs an error and falls back to an empty
+registry, which presents as "no entity types registered" for every language
+rather than as a hard failure.
 
 ### Registry structure
 
@@ -238,34 +251,38 @@ curl -X POST http://localhost:5000/sync_models
 
 ## Response Schema
 
-Each result object follows the DT4H CDM v2 (`NlpResponse`) structure:
+Each result object follows the DT4H CDM (`NlpResponse`) structure. Fields not
+produced by the pipeline are emitted as `null` rather than omitted:
 
 ```json
 {
   "nlp_output": {
     "record_metadata": {
+      "clinical_site_id":                 "SITE-1",
       "patient_id":                       "P1",
       "admission_id":                     "A1",
+      "record_id":                        42,
+      "deidentified":                     "yes",
+      "deidentification_pipeline_name":   "deid",
+      "deidentification_pipeline_version":"2.1",
       "text":                             "<original input text>",
-      "nlp_processing_date":              "2026-05-08T18:13:39.693396",
+      "nlp_processing_date":              "2026-05-08T18:13:39.693+02:00",
       "nlp_processing_pipeline_name":     "Dt4hFormatter",
       "nlp_processing_pipeline_version":  "1.0",
-      "..."
+      "...":                              "remaining CDM metadata fields"
     },
     "annotations": [
       {
-        "concept_class":          "symptom",
-        "start_offset":           18,
-        "end_offset":             24,
-        "mention_string":         "fiebre",
-        "extraction_confidence":  0.9999,
-        "concept_str":            "fiebre",
-        "concept_code":           "64882008",
-        "concept_confidence":     1.0,
-        "negation":               "no",
-        "negation_confidence":    0.0,
-        "uncertainty":            "no",
-        "uncertainty_confidence": 0.0
+        "concept_class":                               "symptom",
+        "start_offset":                                18,
+        "end_offset":                                  24,
+        "concept_mention_string":                      "fiebre",
+        "concept_confidence":                          0.9999,
+        "negation":                                    "no",
+        "negation_confidence":                         0.0,
+        "controlled_vocabulary_concept_identifier":    "64882008",
+        "controlled_vocabulary_concept_official_term": "fiebre",
+        "...":                                         "remaining CDM annotation fields"
       }
     ],
     "processing_success": true
@@ -279,7 +296,22 @@ Each result object follows the DT4H CDM v2 (`NlpResponse`) structure:
 }
 ```
 
-`concept_class` values: `"symptom"`, `"disorder/disease"`, `"procedure"`, `"medication"`.
+Notes on specific fields:
+
+- **`concept_confidence`** is the **NER extraction** confidence. The CDM defines
+  one confidence slot per annotation, and its position (immediately before the
+  `ner_component_*` fields) marks it as the extraction score. The entity-linking
+  score has no CDM field and is not serialised — see
+  [`docs/cdm_open_questions.md`](docs/cdm_open_questions.md).
+- **`negation`** is `null` when the negation model was not run, and `"yes"` /
+  `"no"` only for entities that were actually assessed. An unassessed entity is
+  never reported as `"no"`.
+- **`concept_class`** is passed through verbatim from the NER model's own label.
+  The CDM values are `"symptom"`, `"disorder/disease"`, `"procedure"`,
+  `"medication"`, `"cardiology entity"`, `"other"`; a label outside that set logs
+  a warning and is emitted unchanged.
+- Controlled-vocabulary fields are only populated when a NEL stage ran. `run_ner.py`
+  is NER-only, so they are `null` in its output.
 
 ---
 
@@ -355,6 +387,97 @@ curl -X POST "http://localhost:5000/process_bulk?language=es&entities=disease,sy
 ```
 
 Entities in a negated context will have `"negation": "yes"` and a non-zero `negation_confidence`.
+
+---
+
+## Batch Processing (`run_ner.py`)
+
+`run_ner.py` annotates CDM JSON documents straight from the filesystem. It does
+**not** go through the API — it imports the pipeline directly — and it runs
+**NER only**, with no entity linking.
+
+```bash
+uv run run_ner.py                                  # all languages under data/
+uv run run_ner.py -l es en                         # only these languages
+uv run run_ner.py -e disease symptom               # only these entity types
+uv run run_ner.py -i /path/to/input -o /path/out   # custom directories
+```
+
+### Input layout
+
+One subdirectory per language, named by language code. The directory name
+selects the models, so it is authoritative.
+
+```
+data/
+└── es/
+    ├── doc1.json          # text inline
+    ├── doc2.json          # text empty …
+    └── doc2.txt           # … so it is read from here
+```
+
+Input files use the same CDM schema the script emits, with `annotations` left to
+be filled in. Only `nlp_output.record_metadata` is read — any `annotations`,
+`processing_success` or `nlp_service_info` present in the input are ignored.
+
+```json
+{
+  "nlp_output": {
+    "record_metadata": {
+      "clinical_site_id":                  "SITE-1",
+      "patient_id":                        "P1",
+      "admission_id":                      "A1",
+      "record_id":                         42,
+      "deidentified":                      "yes",
+      "deidentification_pipeline_name":    "deid",
+      "deidentification_pipeline_version": "2.1",
+      "report_language":                   "es",
+      "text":                              ""
+    }
+  }
+}
+```
+
+**Text resolution.** If `record_metadata.text` is non-blank it is used as-is.
+Otherwise the script reads the sibling `.txt` file — `doc2.json` pairs with
+`doc2.txt` in the same directory. Inline text always wins when both exist.
+
+**Mandatory metadata.** These seven fields are required; a document missing any
+of them is rejected:
+
+`clinical_site_id`, `patient_id`, `admission_id`, `record_id`, `deidentified`,
+`deidentification_pipeline_name`, `deidentification_pipeline_version`
+
+**Rejection.** A document is rejected — the reason is logged, the document is
+skipped and counted, and the run continues with the rest of the batch — when:
+
+| Condition | Example message |
+|---|---|
+| Malformed JSON | `malformed JSON (Expecting property name…)` |
+| Missing mandatory field | `invalid CDM metadata — …record_id: Field required` |
+| Language mismatch | `report_language is 'ca' but the file is in the 'es' directory` |
+| No text anywhere | `'text' is empty and no sibling doc2.txt exists` |
+| Empty sidecar | `sibling doc2.txt is empty` |
+
+`report_language` is only checked when present; the language directory always
+wins on model selection.
+
+A run ends with a tally, e.g. `All languages processed — 48 document(s)
+annotated, 2 rejected.`
+
+### Output layout
+
+```
+results/
+└── es/
+    ├── raw/doc1.ann          # TSV: label, start, end, span
+    ├── formatted/doc1.json   # full CDM document
+    └── es.tsv                # every annotation, sorted by filename then offset
+```
+
+> **Note:** plain `.txt` input directories are no longer supported. Earlier
+> versions globbed `data/{lang}/*.txt` directly; `.txt` files are now read only
+> as the sidecar of a CDM JSON document.
 
 ---
 
