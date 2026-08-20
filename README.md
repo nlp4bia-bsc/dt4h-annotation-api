@@ -103,7 +103,8 @@ vectorized_dbs:
 - **Disk layout** for auto-derived paths (i.e. when `local_path` is `null`):
   - NER: `{RESOURCES_PATH}/local_models/ner_models/{entity}/{model_name}/`
   - NEL: `{RESOURCES_PATH}/local_models/nel_models/{model_name}/`
-  - Vector DBs: `{RESOURCES_PATH}/vectorized_dbs/{lang}/{entity}_{nel_model_name}.pt`
+  - Vector DBs: `{RESOURCES_PATH}/vectorized_dbs/{lang}/{entity}_{nel_model_name}.faiss`
+    (each with a sibling `.faiss.manifest.json`)
 - **Gazetteers** must be placed manually. Each must be a TSV file with at minimum a `term` column and a `code` column. Setting a gazetteer entry to `null` is safe — the model manager and pipeline pre-flight check will skip it rather than crash. Requests for an entity with a missing or unconfigured gazetteer will fail with a clear error listing all absent resources.
 - **Vector databases** are built automatically from the gazetteer + NEL model on the first request. Once built, the path is written back to the registry so subsequent startups skip the build step. To force a rebuild, set the relevant entry to `null` in the registry.
 - If a model already exists locally (e.g. pre-downloaded or manually placed), set `local_path` directly and leave `repo_id: null` — no download will be attempted.

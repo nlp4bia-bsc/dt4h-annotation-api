@@ -135,6 +135,25 @@ class ModelManager:
                 )
             )
 
+        # --- rerank: same rule as nel, but optional ---
+        # Every language ships with repo_id null, so the guard below skips them
+        # all by default and no reranker is ever downloaded unless configured.
+        for lang, cfg in (registry.get("rerank") or {}).items():
+            if not (cfg and cfg.get("repo_id") and not cfg.get("local_path")):
+                continue
+            local_path, _ = self.resolver.get_rerank_path(lang)
+            pending.append(
+                PendingResource(
+                    resource="rerank",
+                    lang=lang,
+                    task=None,
+                    repo_id=cfg["repo_id"],
+                    branch=cfg.get("branch"),
+                    local_path=local_path,
+                    registry_keys=("rerank", lang),
+                )
+            )
+
         # --- vectorized_dbs: build when registry value is null ---
         for lang, tasks in (registry.get("vectorized_dbs") or {}).items():
             for task, raw_val in (tasks or {}).items():
@@ -276,7 +295,7 @@ class ModelManager:
                 if resource_type == "gazetteers":
                     validated_path = self.downloader.check_gazetteer(local_path)
 
-                elif resource_type in ("ner", "nel"):
+                elif resource_type in ("ner", "nel", "rerank"):
                     assert repo_id
                     if local_path in downloaded_paths:
                         validated_path = str(local_path)

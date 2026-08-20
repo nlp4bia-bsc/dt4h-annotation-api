@@ -17,28 +17,37 @@ repository populates it, and no rule has been supplied for deriving it.
 
 ---
 
-## 2. NEL confidence has no CDM field
+## 2. NER confidence has no CDM field
 
-**Status:** structural gap in the CDM, needs raising with the CDM owners.
+**Status:** resolved for `concept_confidence`; the NER score remains unreported.
 
 The CDM defines exactly one confidence slot per annotation,
 `concept_confidence`, positioned immediately before `ner_component_type` /
-`ner_component_version`. Its placement indicates it is the *extraction*
-confidence, so that is what we put there.
+`ner_component_version`. It has been assigned to the **NEL linking
+confidence** — how confident the pipeline is that the mention maps to the
+emitted `controlled_vocabulary_concept_identifier`.
 
-That leaves the entity-linking score with nowhere to go. Before the CDM
+That leaves the NER extraction score with nowhere to go. Before the CDM
 realignment this repository emitted both — `extraction_confidence` for the NER
 score and `concept_confidence` for the NEL score — but `extraction_confidence`
 is not a CDM field and was removed.
 
-**Current behaviour:** `concept_confidence` carries the NER score. `nel_score`
-is computed by the biencoder/BM25/fuzzy pipelines and then dropped during CDM
-serialisation. It survives in `PassthroughFormatter` output.
+**Current behaviour:** `concept_confidence` carries the NEL score
+(`Dt4hFormatter._rename_annotation`). NER-only runs (`run_ner.py`) have no
+`nel_score` and therefore emit `concept_confidence: null` — the field is not
+back-filled with the extraction score, which measures a different thing.
+`ner_score` is dropped during CDM serialisation and survives only in
+`PassthroughFormatter` output.
 
-**Options when this is picked up:** add a CDM field for linking confidence; or
-overload `concept_confidence` depending on whether a NEL stage ran (rejected —
-one field cannot carry two different measurements); or agree that linking
-confidence is out of scope for the CDM.
+**Interaction with reranking:** when a cross-encoder reranker runs it becomes
+the authority on `concept_confidence` — it is the component that decided the
+code. The retrieval score survives in the raw annotation's `metadata` but not
+in the CDM, which has room for one number.
+
+**Options when this is picked up:** add a CDM field for extraction confidence;
+or agree that extraction confidence is out of scope for the CDM. Overloading
+`concept_confidence` depending on which stages ran is rejected — one field
+cannot carry two different measurements.
 
 ---
 

@@ -4,6 +4,7 @@ from abc import abstractmethod
 from app.model_manager.resolver import LocalResolver
 from app.src.ner import encoder_inference
 from app.src.nel import lookup_inference, fuzzymatch_inference, bm25okapi_inference, biencoder_inference
+from app.src.nel.linker import EntityLinker
 from app.src.negation.negation_utils import add_negation_uncertainty_attributes
 from app.utils.results_postprocessing import join_all_entities
 
@@ -149,6 +150,11 @@ class LookupPipeline(AnnotationPipeline):
 
 
 class FuzzyMatchPipeline(AnnotationPipeline):
+    """NER → fuzzy string matching against the gazetteer.
+
+    Registered in ``app/__init__.py:method2pipeline`` but not reachable over
+    HTTP: ``/process_bulk`` hardcodes ``method = 'biencoder'``.
+    """
 
     def __init__(
         self,
@@ -168,12 +174,17 @@ class FuzzyMatchPipeline(AnnotationPipeline):
         self.ner_pths = [self.resolver.get_ner_path(lang, e)[0] for e in entities]
 
     def predict(self, texts: list[str]) -> list[list[dict]]:
-        ner_results = ner_inference(texts, self.ner_pths, agg_strat=self.agg_strat)
+        ner_results = encoder_inference(texts, self.ner_pths, agg_strat=self.agg_strat)
         fuzzy_result = fuzzymatch_inference(ner_results, self.gaz_pths, self.method, self.threshold)
         return join_all_entities(fuzzy_result)
 
 
 class BM25OkapiPipeline(AnnotationPipeline):
+    """NER → BM25 ranking against the gazetteer.
+
+    Registered in ``app/__init__.py:method2pipeline`` but not reachable over
+    HTTP: ``/process_bulk`` hardcodes ``method = 'biencoder'``.
+    """
 
     def __init__(
         self,
@@ -189,7 +200,7 @@ class BM25OkapiPipeline(AnnotationPipeline):
         self.ner_pths = [self.resolver.get_ner_path(lang, e)[0] for e in entities]
 
     def predict(self, texts: list[str]) -> list[list[dict]]:
-        ner_results = ner_inference(texts, self.ner_pths, agg_strat=self.agg_strat)
+        ner_results = encoder_inference(texts, self.ner_pths, agg_strat=self.agg_strat)
         bm25_result = bm25okapi_inference(ner_results, self.gaz_pths)
         return join_all_entities(bm25_result)
 
@@ -214,8 +225,26 @@ class BiencoderPipeline(AnnotationPipeline):
     ner_version : int
         NER pre and postprocessing version to use. Model is called in the same
         way but inputs are chunked and postprocessed in the same way
-    device : str 
+    exact_match, tfidf_char, bm25 : bool
+        Extra NEL candidate generators fused with the dense retriever, per
+        entity type. All off by default. Enabling any **changes which codes
+        are emitted** and there is no evaluation harness here to measure that;
+        validate against a labelled set first. See ``EntityLinker``.
+    rerank : bool
+        Rescore the NEL shortlist with a cross-encoder. Off by default, and
+        requires ``rerank.<lang>`` to name a checkpoint in the registry — every
+        language ships with ``repo_id: null``, so this raises
+        ``ModelNotFoundError`` until one is configured. One reranker is shared
+        across all entity types for the language, as the NEL model is.
+    device : str
         Torch device string, e.g. "cuda:0"
+
+    Notes
+    -----
+    The FAISS index and the NEL encoder are opened once, here in ``__init__``,
+    and reused by every ``predict`` call. Because ``app/__init__.py`` caches
+    pipelines by ``(method, lang, entities, negation)``, that means once per
+    process rather than once per request per entity type.
     """
 
     def __init__(
@@ -224,6 +253,10 @@ class BiencoderPipeline(AnnotationPipeline):
         entities: list[str],
         negation: bool=True,
         ner_version: int=2,
+        exact_match: bool=False,
+        tfidf_char: bool=False,
+        bm25: bool=False,
+        rerank: bool=False,
     ):
         self.negation = negation
         self.lang = lang
@@ -236,6 +269,27 @@ class BiencoderPipeline(AnnotationPipeline):
         self.gaz_paths = [self.resolver.get_gaz_path(self.lang, e) for e in entities]
         self.vdb_paths = [self.resolver.get_vector_db_path(self.lang, e)[0] for e in entities]
 
+        # Resolved once and shared: a cross-encoder is language-scoped, not
+        # entity-scoped, and get_reranker caches by path anyway.
+        self.rerank_path = self.resolver.get_rerank_path(self.lang)[0] if rerank else None
+
+        # One linker per entity type, each holding its own FAISS index. Built
+        # eagerly so a missing or stale index fails at pipeline construction
+        # rather than midway through serving a request.
+        self.linkers = [
+            EntityLinker(
+                gaz_path=gaz_path,
+                model_path=self.nel_path,
+                index_path=vdb_path,
+                exact_match=exact_match,
+                tfidf_char=tfidf_char,
+                bm25=bm25,
+                lexical_index_path=self.resolver.get_lexical_index_path(self.lang, entity),
+                rerank_model_path=self.rerank_path,
+            )
+            for entity, gaz_path, vdb_path in zip(entities, self.gaz_paths, self.vdb_paths)
+        ]
+
     def predict(self, texts: list[str]) -> list[list[dict]]:
         # use v2 encoder
         ner_results = encoder_inference(
@@ -244,16 +298,12 @@ class BiencoderPipeline(AnnotationPipeline):
 
         # If no negation, run the standard pipeline and exit
         if not self.negation:
-            norm_results = biencoder_inference(
-                ner_results, self.nel_path, self.gaz_paths, self.vdb_paths
-            )
+            norm_results = biencoder_inference(ner_results, self.linkers)
             return join_all_entities(norm_results)
 
         # If negation exists, handle the specialized pipeline
         neg_results = ner_results.pop()
-        norm_results = biencoder_inference(
-            ner_results, self.nel_path, self.gaz_paths, self.vdb_paths
-        )
+        norm_results = biencoder_inference(ner_results, self.linkers)
         norm_results = join_all_entities(norm_results)
-        
+
         return add_negation_uncertainty_attributes(norm_results, neg_results)

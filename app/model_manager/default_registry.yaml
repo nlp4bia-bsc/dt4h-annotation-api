@@ -175,6 +175,36 @@ nel:
     repo_id: cambridgeltl/SapBERT-UMLS-2020AB-all-lang-from-XLMR-large
     local_path: null
     branch: null
+rerank:
+  cz:
+    repo_id: null
+    local_path: null
+    branch: null
+  en:
+    repo_id: null
+    local_path: null
+    branch: null
+  es:
+    repo_id: null
+    local_path: null
+    branch: null
+  it:
+    repo_id: null
+    local_path: null
+    branch: null
+  nl:
+    repo_id: null
+    local_path: null
+    branch: null
+  ro:
+    repo_id: null
+    local_path: null
+    branch: null
+  sv:
+    repo_id: null
+    local_path: null
+    branch: null
+
 gazetteers:
   cz:
     disease: <path_to_gazetteer>

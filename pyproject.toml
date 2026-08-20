@@ -5,6 +5,7 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
+    "faiss-cpu>=1.9.0",
     "flashtext>=2.7",
     "flask>=3.1.3",
     "huggingface-hub>=1.4.1",
@@ -15,9 +16,42 @@ dependencies = [
     "pyyaml>=6.0",
     "rank-bm25>=0.2.2",
     "rapidfuzz>=3.14.3",
+    # scikit-learn and scipy arrive transitively via sentence-transformers, but
+    # app/src/nel/lexical_index.py imports both directly and stamps their
+    # versions into each index manifest — so they are declared, not assumed.
+    "scikit-learn>=1.3",
+    "scipy>=1.11",
     "sentence-transformers>=5.2.3",
     "spacy>=3.8.11",
     "torch>=2.10.0",
     "tqdm>=4.66",
     "transformers>=5.2.0",
 ]
+
+# faiss-cpu and any faiss-gpu wheel both install a top-level module named
+# `faiss` and cannot be installed side by side. The GPU build therefore lives
+# in an extra: `uv sync --extra gpu` swaps the CPU wheel for the CUDA one.
+# `app/src/nel/vector_store.py` detects at runtime which build is present
+# (faiss.get_num_gpus()) and needs no configuration either way.
+#
+# Note: the `faiss-gpu` project on PyPI is unmaintained (last release 1.7.2,
+# 2022). The maintained CUDA wheels are faiss-gpu-cu12 / faiss-gpu-cu11.
+[project.optional-dependencies]
+gpu = [
+    "faiss-gpu-cu12>=1.9.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    # tests/test_no_undefined_names.py shells out to ruff for F821. Declared so
+    # the check runs rather than skips; it falls back to uvx when absent.
+    "ruff>=0.6",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# The suite runs offline against a stub encoder: no model download, no
+# registry.yaml, no app/resources/. Keep it that way — a test that needs a
+# real checkpoint belongs behind an explicit marker, not in the default run.
+addopts = "-q"

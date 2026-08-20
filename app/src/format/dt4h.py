@@ -20,7 +20,7 @@ The table below shows how raw pipeline fields map to CDM fields:
 +----------------------+---------------------------------------------------+----------------------------------+
 | ``span``             | ``concept_mention_string``                        |                                  |
 +----------------------+---------------------------------------------------+----------------------------------+
-| ``ner_score``        | ``concept_confidence``                            | see "Confidence" below           |
+| ``nel_score``        | ``concept_confidence``                            | see "Confidence" below           |
 +----------------------+---------------------------------------------------+----------------------------------+
 | ``code``             | ``controlled_vocabulary_concept_identifier``      | absent for NER-only pipelines    |
 +----------------------+---------------------------------------------------+----------------------------------+
@@ -33,10 +33,17 @@ The table below shows how raw pipeline fields map to CDM fields:
 
 Confidence
 ----------
-The CDM defines a single confidence slot per annotation, ``concept_confidence``,
-positioned immediately before the ``ner_component_*`` fields.  It therefore
-carries the **NER extraction confidence**.  ``nel_score`` has no CDM field of its
-own and is not serialised; see ``docs/cdm_open_questions.md``.
+The CDM defines a single confidence slot per annotation, ``concept_confidence``.
+It carries the **NEL linking confidence** — how confident the pipeline is that
+the mention maps to the emitted ``controlled_vocabulary_concept_identifier``.
+
+``ner_score`` has no CDM field of its own and is not serialised; it survives in
+``PassthroughFormatter`` output.  See ``docs/cdm_open_questions.md``.
+
+NER-only pipelines (``run_ner.py``) produce no ``nel_score``, so they emit
+``concept_confidence: null``.  That is the honest value: no linking claim was
+made, and the field must not be back-filled with an extraction score, which
+measures something else entirely.
 
 Not assessed vs. assessed-negative
 ----------------------------------
@@ -179,7 +186,7 @@ class Dt4hFormatter(DataFormatter):
     def _rename_annotation(ann: dict) -> dict:
         """Convert a single raw annotation dict to CDM field names.
 
-        Only the five NER fields are required.  Linking and negation fields are
+        Only the four span fields are required.  Linking and negation fields are
         optional so that NER-only pipelines (see ``run_ner.py``) serialise
         without having to stub them out; anything absent becomes ``null``.
 
@@ -196,7 +203,7 @@ class Dt4hFormatter(DataFormatter):
         Raises
         ------
         ValueError
-            If one of the required NER fields is absent from ``ann``.
+            If one of the required span fields is absent from ``ann``.
         """
         try:
             renamed = {
@@ -204,12 +211,14 @@ class Dt4hFormatter(DataFormatter):
                 "start_offset":             ann["start"],
                 "end_offset":               ann["end"],
                 "concept_mention_string":   ann["span"],
-                "concept_confidence":       ann["ner_score"],
             }
         except KeyError as exc:
             raise ValueError(f"Missing expected annotation field: {exc}") from exc
 
         # --- Linking (absent for NER-only pipelines) ---
+        # concept_confidence is the *linking* confidence; a run with no NEL
+        # stage emits null rather than falling back to the extraction score.
+        renamed["concept_confidence"] = ann.get("nel_score")
         renamed["controlled_vocabulary_concept_identifier"] = ann.get("code")
         renamed["controlled_vocabulary_concept_official_term"] = ann.get("term")
 
