@@ -49,7 +49,9 @@ def _check_resources(
             try:
                 _, built = resolver.get_vector_db_path(lang, e)
                 if not built:
-                    missing.append(f"Vector DB {lang}/{e}: not built — run 'uv run test_init.py'")
+                    missing.append(
+                        f"Vector DB {lang}/{e}: not built — run 'uv run python -m app.model_manager'"
+                    )
             except Exception as exc:
                 missing.append(f"Vector DB {lang}/{e}: {exc}")
 

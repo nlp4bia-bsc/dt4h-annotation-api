@@ -15,7 +15,7 @@ cp app/model_manager/default_registry.yaml app/model_manager/registry.yaml
 # Download all models listed in the registry
 uv run python -m app.model_manager
 
-# Pre-flight validation (also pre-builds missing vector DBs)
+# Pre-flight validation (checks only — the model manager above builds the vector DBs)
 uv run test_init.py
 
 # Test suite — offline, ~1s, needs no registry.yaml, resources, or model download
@@ -184,7 +184,8 @@ languages registered" rather than an error.
 - NEL models: `{RESOURCES_PATH}/local_models/nel_models/{model_name}/`
 - Gazetteers: absolute paths given directly in the registry (TSV with `term` + `code`)
 - Vector DBs: `{RESOURCES_PATH}/vectorized_dbs/{lang}/{entity}_{nel_model_name}.faiss`
-  — auto-built on first request; swapping the NEL model triggers a rebuild.
+  — built by `python -m app.model_manager`, never at request time; swapping
+  the NEL model changes the filename and so triggers a rebuild.
   Each index has a sibling `.faiss.manifest.json` pinning the gazetteer SHA-256,
   model name, embedding dim and row count. Editing a gazetteer invalidates its
   index: loading raises rather than returning codes from shifted rows.
@@ -211,8 +212,10 @@ Registered entity types are `disease`, `symptom`, `procedure`, `drug`, plus
 1. Add NER entry under `ner.<lang>.<entity>` with `repo_id` and `local_path: null`.
 2. Add NEL entry under `nel.<lang>` if not present.
 3. Add gazetteer absolute path under `gazetteers.<lang>.<entity>`.
-4. Add `vectorized_dbs.<lang>.<entity>: null` — built on first `biencoder` request.
-5. Run `uv run test_init.py` to pre-build the vector DB before serving.
+4. Add `vectorized_dbs.<lang>.<entity>: null`.
+5. Run `uv run python -m app.model_manager` to build the vector DB — nothing
+   builds it lazily, and `BiencoderPipeline` refuses to start without it.
+6. Optionally run `uv run test_init.py` to check the pipeline end to end.
 
 ## Cross-encoder reranking
 

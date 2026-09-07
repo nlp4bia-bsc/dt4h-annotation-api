@@ -92,7 +92,7 @@ gazetteers:
 
 vectorized_dbs:
   es:
-    disease: null   # built automatically on first run
+    disease: null   # built by 'python -m app.model_manager'
     symptom: null
 ```
 
@@ -106,7 +106,7 @@ vectorized_dbs:
   - Vector DBs: `{RESOURCES_PATH}/vectorized_dbs/{lang}/{entity}_{nel_model_name}.faiss`
     (each with a sibling `.faiss.manifest.json`)
 - **Gazetteers** must be placed manually. Each must be a TSV file with at minimum a `term` column and a `code` column. Setting a gazetteer entry to `null` is safe — the model manager and pipeline pre-flight check will skip it rather than crash. Requests for an entity with a missing or unconfigured gazetteer will fail with a clear error listing all absent resources.
-- **Vector databases** are built automatically from the gazetteer + NEL model on the first request. Once built, the path is written back to the registry so subsequent startups skip the build step. To force a rebuild, set the relevant entry to `null` in the registry.
+- **Vector databases** are built from the gazetteer + NEL model by `python -m app.model_manager`, **not** on demand at request time: a pipeline whose index is missing refuses to start rather than building one mid-request. Once built, the path is written back to the registry so subsequent startups skip the build step. To force a rebuild, set the relevant entry to `null` in the registry and rerun the model manager.
 - If a model already exists locally (e.g. pre-downloaded or manually placed), set `local_path` directly and leave `repo_id: null` — no download will be attempted.
 - Swapping the NEL model produces a new vector DB filename automatically, triggering a rebuild.
 
@@ -128,7 +128,7 @@ uv run python -m app.model_manager
 
 ### 2. Pre-flight pipeline check
 
-After downloading models, run the standalone validation script to verify end-to-end pipeline correctness and pre-build any missing vector databases (GPU strongly preferred for this step):
+After downloading models, run the standalone validation script to verify end-to-end pipeline correctness (GPU strongly preferred for this step). It builds nothing — step 1 must have produced the vector DBs already:
 
 ```bash
 uv run test_init.py
@@ -140,7 +140,7 @@ If any required resource is absent — NER/NEL model not downloaded, gazetteer n
 RuntimeError: Cannot start pipeline — 3 resource(s) unavailable:
   • NER es/disease: not downloaded — run 'python -m app.model_manager'
   • NEL es: not downloaded — run 'python -m app.model_manager'
-  • Vector DB es/disease: not built — run 'uv run test_init.py'
+  • Vector DB es/disease: not built — run 'uv run python -m app.model_manager'
 ```
 
 The same pre-flight check runs whenever a pipeline is first instantiated at inference time.
@@ -424,12 +424,12 @@ leaving the rest of the run intact:
 
 ```
 [es] NEL model not downloaded — run 'uv run python -m app.model_manager'.
-[es] 'symptom' vector DB not built — run 'uv run test_init.py' to build it.
+[es] 'symptom' vector DB not built — run 'uv run python -m app.model_manager' to build it.
 [es] 2 NEL resource(s) unavailable — skip.
 ```
 
 Editing a gazetteer after its index was built invalidates the index; that
-surfaces at load time and is fixed by rerunning `test_init.py`.
+surfaces at load time and is fixed by rerunning `python -m app.model_manager`.
 
 ### Input layout
 

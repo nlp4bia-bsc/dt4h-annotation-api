@@ -13,7 +13,8 @@ Two modes, selected by ``--nel``:
 ``--nel`` needs more on disk than the default mode: the NEL encoder, a
 gazetteer per entity type, and a built vector DB per entity type.  Missing
 resources abort *that language* with a message naming each one; the run
-continues with the next.  Pre-build the indexes with ``uv run test_init.py``.
+continues with the next.  Build the indexes with
+``uv run python -m app.model_manager``.
 
 Usage:
     uv run run_nerl.py
@@ -148,7 +149,7 @@ def _check_nel_registry(resolver, lang: str, entity_types: list[str]) -> bool:
             _, built = resolver.get_vector_db_path(lang, entity)
             if not built:
                 problems.append(
-                    f"'{entity}' vector DB not built — run 'uv run test_init.py' to build it."
+                    f"'{entity}' vector DB not built — run 'uv run python -m app.model_manager' to build it."
                 )
         except (ModelNotFoundError, FileNotFoundError) as exc:
             problems.append(f"'{entity}' vector DB unavailable: {exc}")
@@ -303,7 +304,7 @@ def _parse_args() -> argparse.Namespace:
     p.add_argument("--nel",            action="store_true",
                    help="Link each entity to a gazetteer code after NER (adds code/term/nel_score). "
                         "Requires the NEL model, a gazetteer and a built vector DB per entity type; "
-                        "pre-build with 'uv run test_init.py'. Default: NER only.")
+                        "build with 'uv run python -m app.model_manager'. Default: NER only.")
     return p.parse_args()
 
 
@@ -417,7 +418,7 @@ def main() -> None:
                 # is the part distinguishing a stale index from an unloadable
                 # model, and the run continues with the next language.
                 log.error("[%s] NEL pipeline failed to load — %s: %s", lang, type(exc).__name__, exc)
-                log.error("[%s] If a gazetteer changed, rebuild its index with 'uv run test_init.py' — skip.", lang)
+                log.error("[%s] If a gazetteer changed, rebuild its index with 'uv run python -m app.model_manager' — skip.", lang)
                 log.debug("[%s] NEL pipeline traceback:", lang, exc_info=True)
                 continue
 
