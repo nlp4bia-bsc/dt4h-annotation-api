@@ -1,8 +1,23 @@
 """
-run_ner.py — NER-only batch inference over data/{lang}/ samples.
+run_nerl.py — batch NER (+ optional NEL) inference over data/{lang}/ samples.
+
+Two modes, selected by ``--nel``:
+
+  * **NER only** (default) — token classification, nothing else.  Annotations
+    carry no ``code``/``term``/``nel_score``; the CDM output emits nulls there.
+  * **NER + NEL** (``--nel``) — the same ``BiencoderPipeline`` the Flask
+    ``/process_bulk`` endpoint uses, minus negation: NER, then dense retrieval
+    against the per-entity FAISS index, so every annotation carries a
+    normalised ``code``, its canonical ``term`` and a ``nel_score``.
+
+``--nel`` needs more on disk than the default mode: the NEL encoder, a
+gazetteer per entity type, and a built vector DB per entity type.  Missing
+resources abort *that language* with a message naming each one; the run
+continues with the next.  Pre-build the indexes with ``uv run test_init.py``.
 
 Usage:
-    uv run run_ner.py
+    uv run run_nerl.py
+    uv run run_nerl.py --nel -l es -e disease symptom
 
 Input format
 ------------
@@ -29,7 +44,8 @@ A document is **rejected** (logged, skipped, counted; the run continues) when:
 For each language directory found in data/:
   1. Checks the registry: all NER models must have a local_path (i.e. downloaded).
   2. Loads all .json files from data/{lang}/, resolving text as described above.
-  3. Runs NER inference across all registered entity types (disease, symptom, etc.).
+  3. Runs inference across all registered entity types (disease, symptom, etc.) —
+     NER alone, or NER + NEL under ``--nel``.
   4. Writes results/{lang}/raw/{stem}.ann   — flat entity spans per document.
   5. Writes results/{lang}/formatted/{stem}.json — DT4H CDM JSON per document.
   6. Writes results/{lang}/{lang}.tsv — all annotations across all files, sorted by filename then start span.
@@ -49,13 +65,19 @@ log = logging.getLogger(__name__)
 # tokenization false alarm since preprococessing handles model size overflow
 logging.getLogger("transformers.tokenization_utils_base").setLevel(logging.ERROR)
 
-def _check_registry(resolver, lang: str, entity_filter: list[str] | None = None) -> list[Path] | None:
+def _check_registry(
+    resolver, lang: str, entity_filter: list[str] | None = None
+) -> tuple[list[str], list[Path]] | None:
     """
-    Return list of local NER model paths for *lang*, or None if any are missing.
+    Return ``(entity_types, ner_model_paths)`` for *lang*, or None if any are missing.
 
     Reads local_path from the registry YAML directly: a null entry means the
     model has not been downloaded yet, so the whole language is skipped.
     If *entity_filter* is given, only those entity types are checked/used.
+
+    The entity names come back alongside the paths because ``--nel`` builds a
+    ``BiencoderPipeline``, which resolves its own model paths and needs the
+    names; both lists are in the same order.
     """
     from app.model_manager.resolver import ModelNotFoundError
 
@@ -82,7 +104,62 @@ def _check_registry(resolver, lang: str, entity_filter: list[str] | None = None)
             return None
         model_paths.append(path)
 
-    return model_paths
+    return entity_types, model_paths
+
+
+def _check_nel_registry(resolver, lang: str, entity_types: list[str]) -> bool:
+    """
+    Return True when every NEL resource for *lang* is present.
+
+    ``BiencoderPipeline`` runs equivalent checks and raises one RuntimeError
+    listing what it could not find, but that arrives as a single opaque blob
+    partway through a run. Checking here instead keeps a NEL failure in the same
+    per-resource, ``[lang] ... — skip.`` form the NER check above uses, and names
+    the command that fixes each one.
+
+    Unlike ``_check_registry``, this reports *every* problem before giving up
+    rather than returning on the first: a missing vector DB and a missing
+    gazetteer are fixed by different commands, and finding that out one run at a
+    time is the slow way to learn it.
+    """
+    from app.model_manager.resolver import ModelNotFoundError
+
+    problems: list[str] = []
+
+    # One NEL encoder is shared across every entity type for the language.
+    try:
+        _, repo_id = resolver.get_nel_path(lang)
+        if repo_id is not None:
+            problems.append(
+                "NEL model not downloaded — run 'uv run python -m app.model_manager'."
+            )
+    except (ModelNotFoundError, FileNotFoundError) as exc:
+        problems.append(f"NEL model unavailable: {exc}")
+
+    # Gazetteer and vector DB are per entity type, and the index is keyed by the
+    # NEL model name — swapping that model reports every index as unbuilt.
+    for entity in entity_types:
+        try:
+            resolver.get_gaz_path(lang, entity)
+        except (ModelNotFoundError, FileNotFoundError) as exc:
+            problems.append(f"'{entity}' gazetteer unavailable: {exc}")
+
+        try:
+            _, built = resolver.get_vector_db_path(lang, entity)
+            if not built:
+                problems.append(
+                    f"'{entity}' vector DB not built — run 'uv run test_init.py' to build it."
+                )
+        except (ModelNotFoundError, FileNotFoundError) as exc:
+            problems.append(f"'{entity}' vector DB unavailable: {exc}")
+
+    for problem in problems:
+        log.warning("[%s] %s", lang, problem)
+    if problems:
+        log.warning("[%s] %d NEL resource(s) unavailable — skip.", lang, len(problems))
+        return False
+
+    return True
 
 
 def _load_document(json_path: Path, lang: str) -> tuple[str, dict] | None:
@@ -158,36 +235,54 @@ def _load_document(json_path: Path, lang: str) -> tuple[str, dict] | None:
     return text, metadata.model_dump()
 
 
-def _write_tsv(path: Path, rows: list[tuple[str, dict]]) -> None:
+def _write_tsv(path: Path, rows: list[tuple[str, dict]], with_nel: bool = False) -> None:
+    """Write the per-language annotation table.
+
+    Under ``--nel`` three linking columns are appended.  They are not merely
+    left blank in NER-only mode: a column that is always empty invites the
+    reader to treat a missing code as an unlinked mention rather than as a
+    stage that never ran.
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
     sorted_rows = sorted(rows, key=lambda r: (r[0], r[1]["start"]))
+    header = ["filename", "label", "start", "end", "span", "ner_score"]
+    if with_nel:
+        header += ["code", "term", "nel_score"]
     with open(path, "w", newline="", encoding="utf-8") as fh:
         writer = csv.writer(fh, delimiter="\t")
-        writer.writerow(["filename", "label", "start", "end", "span", "ner_score"])
+        writer.writerow(header)
         for filename, ann in sorted_rows:
-            writer.writerow([filename, ann["ner_class"], ann["start"], ann["end"], ann["span"], ann["ner_score"]])
+            row = [filename, ann["ner_class"], ann["start"], ann["end"], ann["span"], ann["ner_score"]]
+            if with_nel:
+                row += [ann.get("code"), ann.get("term"), ann.get("nel_score")]
+            writer.writerow(row)
 
 
-def _write_ann(path: Path, annotations: list[dict]) -> None:
+def _write_ann(path: Path, annotations: list[dict], with_nel: bool = False) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "w", newline="", encoding="utf-8") as fh:
         writer = csv.writer(fh, delimiter="\t")
-        
+
         for ann in annotations:
             # Just pass the values as a list in the order you want them
-            writer.writerow([
+            row = [
                 ann["ner_class"],
                 ann["start"],
                 ann["end"],
                 ann["span"],
-            ])
+            ]
+            if with_nel:
+                row += [ann.get("code"), ann.get("term")]
+            writer.writerow(row)
 
 
 def _write_json(path: Path, text: str, annotations: list[dict], footer: dict, formatter) -> None:
     """Serialise one document to CDM JSON.
 
     NER-only annotations carry no linking fields; ``Dt4hFormatter`` treats those
-    as optional and emits nulls, so no stubbing is needed here.
+    as optional and emits nulls, so no stubbing is needed here.  Under ``--nel``
+    the same call fills ``controlled_vocabulary_concept_identifier``,
+    ``..._official_term`` and ``concept_confidence`` from the linker output.
     """
     path.parent.mkdir(parents=True, exist_ok=True)
     result = formatter.serialize(text, annotations, footer)
@@ -196,7 +291,7 @@ def _write_json(path: Path, text: str, annotations: list[dict], footer: dict, fo
 
 
 def _parse_args() -> argparse.Namespace:
-    p = argparse.ArgumentParser(description="NER-only batch inference over clinical text samples.")
+    p = argparse.ArgumentParser(description="Batch NER (optionally + NEL) inference over clinical text samples.")
     p.add_argument("-i", "--input",    type=Path, default=Path("data"),    metavar="DIR",
                    help="Root input directory containing {lang}/ subdirs (default: data/)")
     p.add_argument("-o", "--output",   type=Path, default=Path("results"), metavar="DIR",
@@ -205,6 +300,10 @@ def _parse_args() -> argparse.Namespace:
                    help="Language codes to process, e.g. en es cz (default: all found in input dir)")
     p.add_argument("-e", "--entities", nargs="+", default=None,            metavar="ENTITY",
                    help="Entity types to run, e.g. disease symptom (default: all registered per language)")
+    p.add_argument("--nel",            action="store_true",
+                   help="Link each entity to a gazetteer code after NER (adds code/term/nel_score). "
+                        "Requires the NEL model, a gazetteer and a built vector DB per entity type; "
+                        "pre-build with 'uv run test_init.py'. Default: NER only.")
     return p.parse_args()
 
 
@@ -220,6 +319,11 @@ def main() -> None:
     from app.src.ner import encoder_inference
     from app.utils.results_postprocessing import join_all_entities
 
+    # Deferred: importing the pipeline module pulls in the NEL and negation
+    # stacks, which an NER-only run has no use for.
+    if args.nel:
+        from app.src.pipelines import BiencoderPipeline
+
     try:
         import torch
         _has_cuda = torch.cuda.is_available()
@@ -228,6 +332,7 @@ def main() -> None:
 
     log.info("Input : %s", args.input.resolve())
     log.info("Output: %s", args.output.resolve())
+    log.info("Stages: %s", "NER + NEL" if args.nel else "NER only")
     if args.entities:
         log.info("Entity filter: %s", ", ".join(args.entities))
 
@@ -256,10 +361,17 @@ def main() -> None:
         log.info("")
         log.info("━━━  %s  ━━━", lang.upper())
 
-        model_paths = _check_registry(resolver, lang, entity_filter=args.entities)
-        if model_paths is None:
+        registered = _check_registry(resolver, lang, entity_filter=args.entities)
+        if registered is None:
             continue
-        log.info("[%s] Models loaded: %d", lang, len(model_paths))
+        entity_types, model_paths = registered
+        log.info("[%s] Models loaded: %d (%s)", lang, len(model_paths), ", ".join(entity_types))
+
+        # Checked here, beside the NER check and before any file is read, so a
+        # language that cannot be linked says so up front instead of after
+        # loading and validating every document in it.
+        if args.nel and not _check_nel_registry(resolver, lang, entity_types):
+            continue
 
         json_files = sorted(lang_dir.glob("*.json"))
         if not json_files:
@@ -285,10 +397,39 @@ def main() -> None:
             continue
 
         texts = [text for _, text, _ in loaded]
-        log.info("[%s] Running NER inference on %d document(s)...", lang, len(texts))
 
-        raw = encoder_inference(texts=texts, ner_models=model_paths, version=2)
-        flat = join_all_entities(raw)  # [n_texts][n_entities]
+        pipeline = None
+        if args.nel:
+            # Built here, not before the documents are loaded: opening the FAISS
+            # index and the NEL encoder is the expensive part, and a language
+            # with nothing to annotate should not pay for it.
+            log.info("[%s] Loading NEL resources (%d gazetteer/index pair(s))...",
+                     lang, len(entity_types))
+            try:
+                pipeline = BiencoderPipeline(
+                    lang=lang, entities=entity_types, negation=False, ner_version=2
+                )
+            except Exception as exc:
+                # Everything _check_nel_registry can see was already checked, so
+                # a failure here is the index itself: most often a manifest whose
+                # gazetteer SHA no longer matches, i.e. the TSV was edited after
+                # the index was built. The exception type is logged because that
+                # is the part distinguishing a stale index from an unloadable
+                # model, and the run continues with the next language.
+                log.error("[%s] NEL pipeline failed to load — %s: %s", lang, type(exc).__name__, exc)
+                log.error("[%s] If a gazetteer changed, rebuild its index with 'uv run test_init.py' — skip.", lang)
+                log.debug("[%s] NEL pipeline traceback:", lang, exc_info=True)
+                continue
+
+        log.info("[%s] Running %s inference on %d document(s)...",
+                 lang, "NER + NEL" if args.nel else "NER", len(texts))
+
+        raw = None
+        if pipeline is not None:
+            flat = pipeline.predict(texts)  # [n_texts][n_entities], already joined
+        else:
+            raw = encoder_inference(texts=texts, ner_models=model_paths, version=2)
+            flat = join_all_entities(raw)  # [n_texts][n_entities]
 
         total_ann = sum(len(a) for a in flat)
         log.info("[%s] Inference done — %d annotation(s) found", lang, total_ann)
@@ -296,7 +437,7 @@ def main() -> None:
         ann_rows: list[tuple[str, dict]] = []
         for (json_file, text, metadata), annotations in zip(loaded, flat):
             stem = json_file.stem
-            _write_ann(args.output / lang / "raw" / f"{stem}.ann", annotations)
+            _write_ann(args.output / lang / "raw" / f"{stem}.ann", annotations, with_nel=args.nel)
             _write_json(args.output / lang / "formatted" / f"{stem}.json",
                         text, annotations, metadata, formatter)
             log.info("[%s]   %s → %d annotation(s)", lang, json_file.name, len(annotations))
@@ -305,11 +446,13 @@ def main() -> None:
         processed_total += len(loaded)
 
         tsv_path = args.output / lang / f"{lang}.tsv"
-        _write_tsv(tsv_path, ann_rows)
+        _write_tsv(tsv_path, ann_rows, with_nel=args.nel)
         log.info("[%s] Combined TSV → %s", lang, tsv_path)
         log.info("[%s] Done.", lang)
 
-        del raw, flat, texts, loaded
+        # The pipeline holds the FAISS index and the NEL encoder; dropping it
+        # is what makes the next language start from a clean allocation.
+        del raw, flat, texts, loaded, pipeline
         gc.collect()
         if _has_cuda:
             torch.cuda.empty_cache()

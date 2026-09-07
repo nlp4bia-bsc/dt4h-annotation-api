@@ -1,6 +1,6 @@
 # CDM — open questions and deferred work
 
-Decisions still outstanding after the move to CDM-JSON input in `run_ner.py`.
+Decisions still outstanding after the move to CDM-JSON input in `run_nerl.py`.
 Each entry states the current behaviour, so nothing here is silently broken —
 it is behaviour we chose knowing it may change.
 
@@ -33,7 +33,7 @@ score and `concept_confidence` for the NEL score — but `extraction_confidence`
 is not a CDM field and was removed.
 
 **Current behaviour:** `concept_confidence` carries the NEL score
-(`Dt4hFormatter._rename_annotation`). NER-only runs (`run_ner.py`) have no
+(`Dt4hFormatter._rename_annotation`). NER-only runs (`run_nerl.py`) have no
 `nel_score` and therefore emit `concept_confidence: null` — the field is not
 back-filled with the extraction score, which measures a different thing.
 `ner_score` is dropped during CDM serialisation and survives only in
@@ -95,18 +95,24 @@ mapping is required.
 
 ---
 
-## 5. `run_ner.py` performs no entity linking
+## 5. `run_nerl.py` links only under `--nel`
 
-**Status:** deferred by decision; JSON input was the priority.
+**Status:** resolved for the two fields that carry a code; the rest stay open.
 
-`run_ner.py` runs NER only. Every linking field in its output is therefore
-`null`: `controlled_vocabulary_concept_identifier`,
-`controlled_vocabulary_concept_official_term`,
-`controlled_vocabulary_namespace`, `controlled_vocabulary_version`,
-`controlled_vocabulary_source`, `nel_component_type`, `nel_component_version`.
+`run_nerl.py --nel` builds the same `BiencoderPipeline` the Flask route uses
+(with `negation=False`), so `controlled_vocabulary_concept_identifier`,
+`controlled_vocabulary_concept_official_term` and `concept_confidence` are now
+populated. Without the flag the script runs NER only and all of them stay
+`null` — the honest value for a stage that never ran.
 
-Adding a NEL stage requires a built vector database per language and entity
-type, which is a heavier setup step than the script currently assumes.
+`--nel` needs a built vector database per language and entity type, which is
+why it is opt-in rather than the default: the setup step is heavier than a
+plain NER run assumes. `_check_nel_registry` reports each missing resource by
+name before the run touches a document.
+
+Still `null` in both modes: `controlled_vocabulary_namespace`,
+`controlled_vocabulary_version`, `controlled_vocabulary_source`,
+`nel_component_type`, `nel_component_version` — see §6, which blocks them all.
 
 ---
 
@@ -130,7 +136,7 @@ in the registry, and thread it through `LocalResolver` into the NEL stage.
 
 **Status:** intentional breaking change.
 
-`run_ner.py` previously globbed `data/{lang}/*.txt` and annotated every file it
+`run_nerl.py` previously globbed `data/{lang}/*.txt` and annotated every file it
 found, with empty record metadata. It now globs `data/{lang}/*.json` and reads
 `.txt` files only as the sidecar of a CDM JSON document.
 

@@ -22,8 +22,11 @@ uv run test_init.py
 uv run pytest
 
 # Batch NER over CDM JSON documents in data/{lang}/
-uv run run_ner.py
-uv run run_ner.py -i data -o results -l es en -e disease symptom
+uv run run_nerl.py
+uv run run_nerl.py -i data -o results -l es en -e disease symptom
+
+# Same, with entity linking (needs gazetteers + built vector DBs)
+uv run run_nerl.py --nel -l es -e disease symptom
 
 # Run server
 uv run flask run --host=0.0.0.0 --port=5000
@@ -38,14 +41,17 @@ docker compose build --no-cache && docker compose up
 The repository serves the same pipeline through two independent front ends.
 They share the pipeline and formatter code but nothing else.
 
-| | `app/__init__.py` (Flask) | `run_ner.py` (CLI) |
+| | `app/__init__.py` (Flask) | `run_nerl.py` (CLI) |
 |---|---|---|
 | Transport | HTTP, port 5000 | local filesystem |
 | Input | CogStack envelope in the request body | CDM JSON files in `data/{lang}/` |
-| Stages | NER → NEL → optional negation | NER only |
+| Stages | NER → NEL → optional negation | NER, plus NEL under `--nel` |
 | Intended caller | CogStack/NiFi on `cogstack-net` | run by hand |
 
-`run_ner.py` does not call the API. It imports the pipeline directly.
+`run_nerl.py` does not call the API. It imports the pipeline directly.
+Under `--nel` it builds the same `BiencoderPipeline` the Flask route uses, with
+`negation=False`; the default mode calls `encoder_inference` alone and never
+imports the NEL stack.
 
 ## Flask request flow
 
@@ -83,7 +89,7 @@ POST /process_bulk?language=es&entities=disease,symptom&negation=false
 
 Endpoints, all of them: `GET /` (health), `POST /process_bulk`, `POST /sync_models`.
 
-## run_ner.py input contract
+## run_nerl.py input contract
 
 Input files are CDM JSON — the same schema the script emits, with `annotations`
 left to be filled in. Only `nlp_output.record_metadata` is read; `annotations`,
@@ -108,6 +114,16 @@ The language directory name is authoritative — it selects the models.
 Outputs per language: `results/{lang}/raw/{stem}.ann`,
 `results/{lang}/formatted/{stem}.json`, `results/{lang}/{lang}.tsv`.
 
+`--nel` appends `code` / `term` to the `.ann` rows and `code` / `term` /
+`nel_score` to the TSV; the columns are absent without it rather than empty, so
+a blank code never has to be read as "unlinked" when the stage never ran. The
+CDM JSON needs no switch — `Dt4hFormatter` fills the linking fields when they
+are present and emits nulls when they are not.
+
+Missing NEL resources abort that one language (message names each missing item)
+and the run continues; a language whose documents were all rejected never loads
+the index at all.
+
 ## Key files
 
 | Path | Role |
@@ -128,7 +144,7 @@ Outputs per language: `results/{lang}/raw/{stem}.ann`,
 | `app/model_manager/resolver.py` | `LocalResolver` — single source of truth for all resource paths |
 | `app/model_manager/default_registry.yaml` | Template registry with HuggingFace repo IDs |
 | `app/utils/results_postprocessing.py` | `merge_contiguous_entities`, `join_all_entities` |
-| `run_ner.py` | Batch NER CLI over CDM JSON |
+| `run_nerl.py` | Batch CDM JSON CLI — NER, or NER + NEL under `--nel` |
 | `docs/cdm_open_questions.md` | Deferred CDM decisions and known gaps |
 
 ## CDM models
@@ -149,7 +165,7 @@ models or source records are surfaced, not fatal. Use `_controlled()` /
 
 `concept_confidence` carries the **NEL** score. The CDM has one confidence slot
 per annotation and no home for the NER score — see `docs/cdm_open_questions.md`.
-NER-only runs (`run_ner.py`) emit `concept_confidence: null`.
+NER-only runs (`run_nerl.py` without `--nel`) emit `concept_confidence: null`.
 
 `negation` is `null` when the negation model was not run, and only `"yes"`/`"no"`
 when an entity was actually assessed. Do not default it to `"no"`.

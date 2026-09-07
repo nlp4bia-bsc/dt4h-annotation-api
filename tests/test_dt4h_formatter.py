@@ -52,7 +52,7 @@ def test_ner_only_annotations_emit_a_null_confidence(formatter):
 
 
 def test_ner_only_annotations_do_not_raise(formatter):
-    """run_ner.py produces these; a missing nel_score is not an error."""
+    """run_nerl.py produces these; a missing nel_score is not an error."""
     renamed = formatter._rename_annotation(NER_ONLY)
     assert renamed["controlled_vocabulary_concept_identifier"] is None
     assert renamed["controlled_vocabulary_concept_official_term"] is None

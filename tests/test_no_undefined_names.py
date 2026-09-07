@@ -23,7 +23,7 @@ from pathlib import Path
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-TARGETS = ["app", "scripts", "tests", "run_ner.py", "test_init.py"]
+TARGETS = ["app", "scripts", "tests", "run_nerl.py", "test_init.py"]
 
 
 def ruff_command() -> list[str] | None:

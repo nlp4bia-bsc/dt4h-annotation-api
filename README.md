@@ -19,7 +19,7 @@ A Flask REST API that chains **Named Entity Recognition (NER)**, **Named Entity 
    - [POST /sync_models](#post-sync_models)
 7. [Response Schema](#response-schema)
 8. [Examples](#examples)
-9. [Batch Processing (`run_ner.py`)](#batch-processing-run_nerpy)
+9. [Batch Processing (`run_nerl.py`)](#batch-processing-run_nerlpy)
 10. [Docker](#docker)
 11. [Architecture](#architecture)
 
@@ -311,8 +311,8 @@ Notes on specific fields:
   The CDM values are `"symptom"`, `"disorder/disease"`, `"procedure"`,
   `"medication"`, `"cardiology entity"`, `"other"`; a label outside that set logs
   a warning and is emitted unchanged.
-- Controlled-vocabulary fields are only populated when a NEL stage ran. `run_ner.py`
-  is NER-only, so they are `null` in its output.
+- Controlled-vocabulary fields are only populated when a NEL stage ran. In
+  `run_nerl.py` that means `--nel`; without it they are `null`.
 
 ---
 
@@ -391,18 +391,45 @@ Entities in a negated context will have `"negation": "yes"` and a non-zero `nega
 
 ---
 
-## Batch Processing (`run_ner.py`)
+## Batch Processing (`run_nerl.py`)
 
-`run_ner.py` annotates CDM JSON documents straight from the filesystem. It does
-**not** go through the API — it imports the pipeline directly — and it runs
-**NER only**, with no entity linking.
+`run_nerl.py` annotates CDM JSON documents straight from the filesystem. It does
+**not** go through the API — it imports the pipeline directly. By default it runs
+**NER only**; `--nel` adds entity linking.
 
 ```bash
-uv run run_ner.py                                  # all languages under data/
-uv run run_ner.py -l es en                         # only these languages
-uv run run_ner.py -e disease symptom               # only these entity types
-uv run run_ner.py -i /path/to/input -o /path/out   # custom directories
+uv run run_nerl.py                                  # all languages under data/
+uv run run_nerl.py -l es en                         # only these languages
+uv run run_nerl.py -e disease symptom               # only these entity types
+uv run run_nerl.py -i /path/to/input -o /path/out   # custom directories
+uv run run_nerl.py --nel                            # NER + entity linking
 ```
+
+### `--nel`
+
+Without the flag, annotations carry only the span and its NER score. With it,
+each one also carries a gazetteer `code`, the canonical `term` and a
+`nel_score`, produced by the same `BiencoderPipeline` the API uses (negation
+off — that stage is available over HTTP only).
+
+Linking needs more on disk than NER does: the NEL encoder, a gazetteer per
+entity type, and a **built vector DB** per entity type. Build them first with:
+
+```bash
+uv run test_init.py
+```
+
+If anything is missing the script names each item and skips that language,
+leaving the rest of the run intact:
+
+```
+[es] NEL model not downloaded — run 'uv run python -m app.model_manager'.
+[es] 'symptom' vector DB not built — run 'uv run test_init.py' to build it.
+[es] 2 NEL resource(s) unavailable — skip.
+```
+
+Editing a gazetteer after its index was built invalidates the index; that
+surfaces at load time and is fixed by rerunning `test_init.py`.
 
 ### Input layout
 
@@ -475,6 +502,12 @@ results/
     ├── formatted/doc1.json   # full CDM document
     └── es.tsv                # every annotation, sorted by filename then offset
 ```
+
+Under `--nel` the flat files gain the linking columns — `code`, `term` on the
+`.ann` rows, and `code`, `term`, `nel_score` on the `.tsv`. They are absent
+rather than blank without the flag, so an empty code is never mistaken for an
+unlinked mention when the linking stage simply never ran. The CDM JSON has the
+fields either way, `null` when NER ran alone.
 
 > **Note:** plain `.txt` input directories are no longer supported. Earlier
 > versions globbed `data/{lang}/*.txt` directly; `.txt` files are now read only

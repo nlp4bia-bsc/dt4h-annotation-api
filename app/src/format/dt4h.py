@@ -40,7 +40,7 @@ the mention maps to the emitted ``controlled_vocabulary_concept_identifier``.
 ``ner_score`` has no CDM field of its own and is not serialised; it survives in
 ``PassthroughFormatter`` output.  See ``docs/cdm_open_questions.md``.
 
-NER-only pipelines (``run_ner.py``) produce no ``nel_score``, so they emit
+NER-only pipelines (``run_nerl.py``) produce no ``nel_score``, so they emit
 ``concept_confidence: null``.  That is the honest value: no linking claim was
 made, and the field must not be back-filled with an extraction score, which
 measures something else entirely.
@@ -187,7 +187,7 @@ class Dt4hFormatter(DataFormatter):
         """Convert a single raw annotation dict to CDM field names.
 
         Only the four span fields are required.  Linking and negation fields are
-        optional so that NER-only pipelines (see ``run_ner.py``) serialise
+        optional so that NER-only pipelines (see ``run_nerl.py``) serialise
         without having to stub them out; anything absent becomes ``null``.
 
         Parameters
