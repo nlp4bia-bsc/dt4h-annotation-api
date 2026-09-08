@@ -22,6 +22,11 @@ dependencies = [
     "scikit-learn>=1.3",
     "scipy>=1.11",
     "sentence-transformers>=5.2.3",
+    # XLM-R checkpoints (SapBERT) carry a SentencePiece tokenizer. Without this
+    # transformers falls back to a TikToken extractor and raises instead of
+    # loading the model. Only the RoBERTa byte-BPE models (ClinLinker) work
+    # without it, so the failure is per-language and easy to miss.
+    "sentencepiece>=0.2.0",
     "spacy>=3.8.11",
     "torch>=2.10.0",
     "tqdm>=4.66",
