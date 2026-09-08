@@ -28,6 +28,7 @@ dependencies = [
     # without it, so the failure is per-language and easy to miss.
     "sentencepiece>=0.2.0",
     "spacy>=3.8.11",
+    "tiktoken>=0.14.0",
     "torch>=2.10.0",
     "tqdm>=4.66",
     "transformers>=5.2.0",
