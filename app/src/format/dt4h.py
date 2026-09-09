@@ -12,7 +12,7 @@ The table below shows how raw pipeline fields map to CDM fields:
 +----------------------+---------------------------------------------------+----------------------------------+
 | Raw field            | CDM field                                         | Notes                            |
 +======================+===================================================+==================================+
-| ``ner_class``        | ``concept_class``                                 | passed through verbatim          |
+| ``ner_class``        | ``concept_class``                                 | mapped, see "Concept class"      |
 +----------------------+---------------------------------------------------+----------------------------------+
 | ``start``            | ``start_offset``                                  |                                  |
 +----------------------+---------------------------------------------------+----------------------------------+
@@ -30,6 +30,20 @@ The table below shows how raw pipeline fields map to CDM fields:
 +----------------------+---------------------------------------------------+----------------------------------+
 | ``negation_score``   | ``negation_confidence``                           |                                  |
 +----------------------+---------------------------------------------------+----------------------------------+
+
+Concept class
+-------------
+``ner_class`` is the NER checkpoint's own label, read from its ``id2label``.
+The checkpoints emit upper-case English labels (``DISEASE``, ``PROCEDURE``),
+the older Spanish ones emit Spanish labels (``ENFERMEDAD``), and the registry
+names the same entity types in lower case (``drug``).  The CDM vocabulary is
+none of those: it is lower case, uses ``disorder/disease`` for disease and
+``medication`` for drug.
+
+``_to_concept_class`` maps between them.  A label it does not recognise is
+passed through unchanged, so ``ConceptClass``'s validator still logs the
+out-of-vocabulary warning naming the offending value — an unknown label stays
+visible instead of being silently flattened to ``other``.
 
 Confidence
 ----------
@@ -60,6 +74,8 @@ Footer fields are mapped directly onto ``RecordMetadata`` using its declared
 field names; unknown footer keys are silently ignored.
 """
 
+import re
+
 from app.src.format.base import DataFormatter
 from app.src.format.data_structures import (
     Annotation,
@@ -68,6 +84,84 @@ from app.src.format.data_structures import (
     NlpServiceInfo,
     RecordMetadata,
 )
+
+# ---------------------------------------------------------------------------
+# Concept class mapping
+# ---------------------------------------------------------------------------
+
+#: Raw NER labels (normalised by :func:`_normalise_label`) → CDM values.
+#: Covers the English checkpoint labels, the Spanish ones, and the registry's
+#: own entity-type names, since all three reach this code.  Every value must be
+#: a member of ``data_structures.CONCEPT_CLASSES``.
+CONCEPT_CLASS_MAP: dict[str, str] = {
+    # disorder/disease
+    "disease":            "disorder/disease",
+    "diseases":           "disorder/disease",
+    "disorder":           "disorder/disease",
+    "disorders":          "disorder/disease",
+    "disorder/disease":   "disorder/disease",
+    "enfermedad":         "disorder/disease",
+    "enfermedades":       "disorder/disease",
+    # symptom
+    "symptom":            "symptom",
+    "symptoms":           "symptom",
+    "sintoma":            "symptom",
+    "síntoma":            "symptom",
+    "sintomas":           "symptom",
+    "síntomas":           "symptom",
+    # procedure
+    "procedure":          "procedure",
+    "procedures":         "procedure",
+    "procedimiento":      "procedure",
+    "procedimientos":     "procedure",
+    # medication — the registry entity type is 'drug', the CDM value is not
+    "medication":         "medication",
+    "medications":        "medication",
+    "drug":               "medication",
+    "drugs":              "medication",
+    "med":                "medication",
+    "meds":               "medication",
+    "medicamento":        "medication",
+    "medicamentos":       "medication",
+    "farmaco":            "medication",
+    "fármaco":            "medication",
+    # already-CDM values, so a conformant checkpoint round-trips untouched
+    "cardiology entity":  "cardiology entity",
+    "other":              "other",
+}
+
+#: BIO tagging prefix left on a label when the HF pipeline aggregates with
+#: ``aggregation_strategy="none"``.
+_BIO_PREFIX = re.compile(r"^[BIOES]-")
+
+
+def _normalise_label(label: str) -> str:
+    """Reduce a raw NER label to the form used as a ``CONCEPT_CLASS_MAP`` key.
+
+    Strips any BIO prefix, lower-cases, and treats ``_`` and ``-`` as spaces so
+    that ``CARDIOLOGY_ENTITY`` and ``cardiology entity`` are the same key.
+    ``/`` is preserved — ``disorder/disease`` is a CDM value in its own right.
+    """
+    label = _BIO_PREFIX.sub("", label.strip())
+    label = label.replace("_", " ").replace("-", " ").lower()
+    return " ".join(label.split())
+
+
+def _to_concept_class(ner_class):
+    """Map a raw NER label onto the CDM ``concept_class`` vocabulary.
+
+    Unrecognised labels are returned unchanged rather than coerced to
+    ``other``: ``ConceptClass`` warns on them by name, which is the signal that
+    a checkpoint emits something this table has not been told about.  Silently
+    flattening them would destroy exactly that signal.
+
+    Non-string values pass through untouched so that malformed pipeline output
+    is reported by Pydantic, not swallowed here.
+    """
+    if not isinstance(ner_class, str):
+        return ner_class
+    return CONCEPT_CLASS_MAP.get(_normalise_label(ner_class), ner_class)
+
 
 # ---------------------------------------------------------------------------
 # Formatter
@@ -207,7 +301,7 @@ class Dt4hFormatter(DataFormatter):
         """
         try:
             renamed = {
-                "concept_class":            ann["ner_class"],
+                "concept_class":            _to_concept_class(ann["ner_class"]),
                 "start_offset":             ann["start"],
                 "end_offset":               ann["end"],
                 "concept_mention_string":   ann["span"],

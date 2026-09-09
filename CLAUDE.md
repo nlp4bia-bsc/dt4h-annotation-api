@@ -205,7 +205,12 @@ When `local_path` is `null`, the resolver returns the target download path plus 
 `repo_id`, and the downloader fetches from HuggingFace, writing `local_path` back.
 
 Registered entity types are `disease`, `symptom`, `procedure`, `drug`, plus
-`negation`. Note `drug` here vs `medication` in the CDM's `concept_class`.
+`negation`. Note `drug` here vs `medication` in the CDM's `concept_class`;
+`dt4h.CONCEPT_CLASS_MAP` reconciles the two.
+
+Czech is `cs` everywhere — registry keys, resource directories, `data/{lang}/`
+input directories and `report_language`. An unregistered language on
+`/process_bulk` is a 400 listing the registered codes, not a 500.
 
 ## Adding a new language or entity type
 
@@ -248,7 +253,7 @@ language has a `negation` entry, but most have `repo_id: null`.
 
 ## Tests
 
-`uv run pytest` — 113 tests, ~1.5s, fully offline. No `registry.yaml`, no
+`uv run pytest` — 130 tests, ~1.5s, fully offline. No `registry.yaml`, no
 `app/resources/`, no model download, no network.
 
 The NEL encoder is replaced by `tests/conftest.py:StubEncoder`, which embeds

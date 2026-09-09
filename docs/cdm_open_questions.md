@@ -70,28 +70,39 @@ serialisation. It survives in `PassthroughFormatter` output.
 
 ---
 
-## 4. `concept_class` is whatever the model emits
+## 4. `concept_class` is mapped from the model's label
 
-**Status:** deliberate, pending confirmation that model labels are CDM-conformant.
+**Status:** resolved — the checkpoints are not CDM-conformant, so a mapping
+table was added.
 
-`concept_class` is populated verbatim from the NER model's own label
-(`ner_class`, read from the checkpoint's `id2label`). The models are produced
-within the same project as the CDM, so their labels are expected to already be
-the CDM values: `symptom`, `disorder/disease`, `procedure`, `medication`,
-`cardiology entity`, `other`.
+`concept_class` originates in the NER model's own label (`ner_class`, read from
+the checkpoint's `id2label`). The models are produced within the same project as
+the CDM, so their labels were *expected* to already be the CDM values. They are
+not: a real run emits `DISEASE`, `PROCEDURE` and friends, which produced a
+warning per annotation.
 
-This was chosen over mapping from the registry entity key
-(`disease` / `symptom` / `procedure` / `drug`), which would have been
-independent of how any checkpoint was labelled.
+**Current behaviour:** `dt4h.CONCEPT_CLASS_MAP` translates the label into the
+CDM vocabulary (`symptom`, `disorder/disease`, `procedure`, `medication`,
+`cardiology entity`, `other`). `_normalise_label` strips any BIO prefix,
+lower-cases, and treats `_`/`-` as spaces, so casing and separator style do not
+each need their own entry. The table covers the English checkpoint labels, the
+Spanish ones (`ENFERMEDAD`, `PROCEDIMIENTO`, …) and the registry's own entity
+names — including `drug`, which the CDM calls `medication`.
 
-**Current behaviour:** the label is passed through unchanged. Any value outside
-the CDM set logs a warning naming the offending value and the document is still
-processed. If those warnings appear in a real run, the fix is a mapping table in
-`Dt4hFormatter._rename_annotation`.
+A label the table does not know is **passed through unchanged**, not coerced to
+`other`. `ConceptClass` then logs the out-of-vocabulary warning naming it, which
+is the signal that a checkpoint emits something the table has not been told
+about; flattening to `other` would destroy exactly that signal while looking
+like success.
 
-**Watch for:** the registry registers an entity type named `drug`, whereas the
-CDM value is `medication`. If the `*_MED` checkpoints emit `drug` or `MED`, a
-mapping is required.
+`tests/test_dt4h_formatter.py` asserts every value in the table is a member of
+`CONCEPT_CLASSES`, so a typo in the table cannot reintroduce the warning it
+exists to remove.
+
+**Still open:** the mapping is derived from the labels observed so far plus the
+registry's entity names. A checkpoint using an unseen label will warn rather
+than fail — watch the logs on a new language or entity type and extend the
+table.
 
 ---
 
