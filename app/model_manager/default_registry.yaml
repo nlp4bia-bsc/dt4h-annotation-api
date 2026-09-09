@@ -1,5 +1,5 @@
 ner:
-  cz:
+  cs:
     disease:
       repo_id: DT4H-IE/CardioBERTa.cs_CZ_DIS
       local_path: null
@@ -147,7 +147,7 @@ ner:
       local_path: null
       branch: null
 nel:
-  cz:
+  cs:
     repo_id: cambridgeltl/SapBERT-UMLS-2020AB-all-lang-from-XLMR-large
     local_path: null
     branch: null
@@ -176,7 +176,7 @@ nel:
     local_path: null
     branch: null
 rerank:
-  cz:
+  cs:
     repo_id: null
     local_path: null
     branch: null
@@ -206,7 +206,7 @@ rerank:
     branch: null
 
 gazetteers:
-  cz:
+  cs:
     disease: <path_to_gazetteer>
     symptom: <path_to_gazetteer>
     procedure: <path_to_gazetteer>
@@ -242,7 +242,7 @@ gazetteers:
     procedure: <path_to_gazetteer>
     drug: <path_to_gazetteer>
 vectorized_dbs:
-  cz:
+  cs:
     disease: null
     symptom: null
     procedure: null

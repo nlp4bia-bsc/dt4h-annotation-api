@@ -298,7 +298,7 @@ def _parse_args() -> argparse.Namespace:
     p.add_argument("-o", "--output",   type=Path, default=Path("results"), metavar="DIR",
                    help="Root output directory for raw/ and formatted/ results (default: results/)")
     p.add_argument("-l", "--langs",    nargs="+", default=None,            metavar="LANG",
-                   help="Language codes to process, e.g. en es cz (default: all found in input dir)")
+                   help="Language codes to process, e.g. en es cs (default: all found in input dir)")
     p.add_argument("-e", "--entities", nargs="+", default=None,            metavar="ENTITY",
                    help="Entity types to run, e.g. disease symptom (default: all registered per language)")
     p.add_argument("--nel",            action="store_true",
