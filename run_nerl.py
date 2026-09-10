@@ -6,19 +6,37 @@ Two modes, selected by ``--nel``:
   * **NER only** (default) — token classification, nothing else.  Annotations
     carry no ``code``/``term``/``nel_score``; the CDM output emits nulls there.
   * **NER + NEL** (``--nel``) — the same ``BiencoderPipeline`` the Flask
-    ``/process_bulk`` endpoint uses, minus negation: NER, then dense retrieval
-    against the per-entity FAISS index, so every annotation carries a
-    normalised ``code``, its canonical ``term`` and a ``nel_score``.
+    ``/process_bulk`` endpoint uses, minus negation: NER, then retrieval
+    against the gazetteer, so every annotation carries a normalised ``code``,
+    its canonical ``term`` and a ``nel_score``.
 
-``--nel`` needs more on disk than the default mode: the NEL encoder, a
-gazetteer per entity type, and a built vector DB per entity type.  Missing
-resources abort *that language* with a message naming each one; the run
-continues with the next.  Build the indexes with
-``uv run python -m app.model_manager``.
+``--nel`` optionally takes the retrieval methods to use, so a bare ``--nel``
+keeps meaning what it always did:
+
+    --nel                  dense bi-encoder retrieval (the default)
+    --nel exact            exact match on the normalised surface form
+    --nel tfidf            character n-gram TF-IDF — typo tolerant
+    --nel bm25             sparse BM25 over the gazetteer terms
+    --nel dense tfidf      two or more methods, combined by rank fusion
+
+Naming more than one method fuses them with reciprocal rank fusion; the
+reported ``nel_score`` is then the similarity from whichever method ranked the
+winning code best, never the fusion score itself.  **Any method set other than
+the default changes which codes are emitted**, and this repository has no
+evaluation harness to measure that — validate against a labelled set before
+trusting a new combination.
+
+What ``--nel`` needs on disk depends on the methods chosen.  Every method needs
+a gazetteer per entity type; ``dense`` additionally needs the NEL encoder and a
+built vector DB per entity type (``uv run python -m app.model_manager``), while
+``tfidf`` and ``bm25`` share one sparse index that is built lazily on first use.
+Missing resources abort *that language* with a message naming each one; the run
+continues with the next.
 
 Usage:
     uv run run_nerl.py
     uv run run_nerl.py --nel -l es -e disease symptom
+    uv run run_nerl.py --nel dense exact tfidf -l es
 
 Input format
 ------------
@@ -66,6 +84,39 @@ log = logging.getLogger(__name__)
 # tokenization false alarm since preprococessing handles model size overflow
 logging.getLogger("transformers.tokenization_utils_base").setLevel(logging.ERROR)
 
+# CLI name → ``BiencoderPipeline`` keyword for each NEL candidate generator.
+# Insertion order is the order the pipeline builds its generators in, so it is
+# also the order methods are reported in; the CLI accepts them in any order.
+NEL_METHOD_FLAGS: dict[str, str] = {
+    "dense": "dense",
+    "exact": "exact_match",
+    "tfidf": "tfidf_char",
+    "bm25": "bm25",
+}
+
+# What a bare ``--nel`` means. Kept as the default because it is what every
+# existing invocation already gets.
+DEFAULT_NEL_METHODS: tuple[str, ...] = ("dense",)
+
+
+def _resolve_nel_methods(selection: list[str] | None) -> list[str] | None:
+    """Turn the raw ``--nel`` value into the list of methods to run.
+
+    ``None`` (flag absent) stays ``None``, meaning NER only.  ``[]`` — the flag
+    given with no methods after it — becomes the default, so ``--nel`` on its
+    own behaves exactly as it did before methods were selectable.  Anything
+    else is deduplicated and put back into ``NEL_METHOD_FLAGS`` order: the
+    linker builds its generators in that order whatever the caller typed, and
+    that order is the tie-break behind the reported score.
+    """
+    if selection is None:
+        return None
+    if not selection:
+        return list(DEFAULT_NEL_METHODS)
+    chosen = set(selection)
+    return [method for method in NEL_METHOD_FLAGS if method in chosen]
+
+
 def _check_registry(
     resolver, lang: str, entity_filter: list[str] | None = None
 ) -> tuple[list[str], list[Path]] | None:
@@ -108,9 +159,11 @@ def _check_registry(
     return entity_types, model_paths
 
 
-def _check_nel_registry(resolver, lang: str, entity_types: list[str]) -> bool:
+def _check_nel_registry(
+    resolver, lang: str, entity_types: list[str], methods: list[str]
+) -> bool:
     """
-    Return True when every NEL resource for *lang* is present.
+    Return True when every NEL resource *methods* needs for *lang* is present.
 
     ``BiencoderPipeline`` runs equivalent checks and raises one RuntimeError
     listing what it could not find, but that arrives as a single opaque blob
@@ -122,20 +175,28 @@ def _check_nel_registry(resolver, lang: str, entity_types: list[str]) -> bool:
     rather than returning on the first: a missing vector DB and a missing
     gazetteer are fixed by different commands, and finding that out one run at a
     time is the slow way to learn it.
+
+    Only the encoder and the vector DB are method-dependent, and only ``dense``
+    wants them: demanding a built index from a run that will never open one
+    would block the lexical methods on the very resource they exist to avoid.
+    The lexical methods need no check of their own — their sparse index is
+    built on first use, from the gazetteer that is verified here anyway.
     """
     from app.model_manager.resolver import ModelNotFoundError
 
     problems: list[str] = []
+    needs_dense = "dense" in methods
 
     # One NEL encoder is shared across every entity type for the language.
-    try:
-        _, repo_id = resolver.get_nel_path(lang)
-        if repo_id is not None:
-            problems.append(
-                "NEL model not downloaded — run 'uv run python -m app.model_manager'."
-            )
-    except (ModelNotFoundError, FileNotFoundError) as exc:
-        problems.append(f"NEL model unavailable: {exc}")
+    if needs_dense:
+        try:
+            _, repo_id = resolver.get_nel_path(lang)
+            if repo_id is not None:
+                problems.append(
+                    "NEL model not downloaded — run 'uv run python -m app.model_manager'."
+                )
+        except (ModelNotFoundError, FileNotFoundError) as exc:
+            problems.append(f"NEL model unavailable: {exc}")
 
     # Gazetteer and vector DB are per entity type, and the index is keyed by the
     # NEL model name — swapping that model reports every index as unbuilt.
@@ -144,6 +205,9 @@ def _check_nel_registry(resolver, lang: str, entity_types: list[str]) -> bool:
             resolver.get_gaz_path(lang, entity)
         except (ModelNotFoundError, FileNotFoundError) as exc:
             problems.append(f"'{entity}' gazetteer unavailable: {exc}")
+
+        if not needs_dense:
+            continue
 
         try:
             _, built = resolver.get_vector_db_path(lang, entity)
@@ -301,15 +365,22 @@ def _parse_args() -> argparse.Namespace:
                    help="Language codes to process, e.g. en es cs (default: all found in input dir)")
     p.add_argument("-e", "--entities", nargs="+", default=None,            metavar="ENTITY",
                    help="Entity types to run, e.g. disease symptom (default: all registered per language)")
-    p.add_argument("--nel",            action="store_true",
+    p.add_argument("--nel",            nargs="*", default=None, metavar="METHOD",
+                   choices=list(NEL_METHOD_FLAGS),
                    help="Link each entity to a gazetteer code after NER (adds code/term/nel_score). "
-                        "Requires the NEL model, a gazetteer and a built vector DB per entity type; "
-                        "build with 'uv run python -m app.model_manager'. Default: NER only.")
+                        f"Optionally takes one or more of: {', '.join(NEL_METHOD_FLAGS)}; "
+                        f"bare '--nel' means {' '.join(DEFAULT_NEL_METHODS)}, and naming several "
+                        "combines them by rank fusion. 'dense' needs the NEL model and a built "
+                        "vector DB per entity type ('uv run python -m app.model_manager'); the "
+                        "others need only the gazetteer. Default: NER only.")
     return p.parse_args()
 
 
 def main() -> None:
     args = _parse_args()
+
+    nel_methods = _resolve_nel_methods(args.nel)
+    with_nel = nel_methods is not None
 
     if not args.input.exists():
         log.error("Input directory %s not found.", args.input)
@@ -322,7 +393,7 @@ def main() -> None:
 
     # Deferred: importing the pipeline module pulls in the NEL and negation
     # stacks, which an NER-only run has no use for.
-    if args.nel:
+    if with_nel:
         from app.src.pipelines import BiencoderPipeline
 
     try:
@@ -333,7 +404,12 @@ def main() -> None:
 
     log.info("Input : %s", args.input.resolve())
     log.info("Output: %s", args.output.resolve())
-    log.info("Stages: %s", "NER + NEL" if args.nel else "NER only")
+    log.info("Stages: %s", f"NER + NEL ({', '.join(nel_methods)})" if with_nel else "NER only")
+    if with_nel and nel_methods != list(DEFAULT_NEL_METHODS):
+        log.warning(
+            "NEL methods other than the default change which codes are emitted — "
+            "validate against a labelled set before trusting these results."
+        )
     if args.entities:
         log.info("Entity filter: %s", ", ".join(args.entities))
 
@@ -371,7 +447,7 @@ def main() -> None:
         # Checked here, beside the NER check and before any file is read, so a
         # language that cannot be linked says so up front instead of after
         # loading and validating every document in it.
-        if args.nel and not _check_nel_registry(resolver, lang, entity_types):
+        if with_nel and not _check_nel_registry(resolver, lang, entity_types, nel_methods):
             continue
 
         json_files = sorted(lang_dir.glob("*.json"))
@@ -400,15 +476,16 @@ def main() -> None:
         texts = [text for _, text, _ in loaded]
 
         pipeline = None
-        if args.nel:
+        if with_nel:
             # Built here, not before the documents are loaded: opening the FAISS
             # index and the NEL encoder is the expensive part, and a language
             # with nothing to annotate should not pay for it.
-            log.info("[%s] Loading NEL resources (%d gazetteer/index pair(s))...",
-                     lang, len(entity_types))
+            log.info("[%s] Loading NEL resources for %s (%d entity type(s))...",
+                     lang, ", ".join(nel_methods), len(entity_types))
             try:
                 pipeline = BiencoderPipeline(
-                    lang=lang, entities=entity_types, negation=False, ner_version=2
+                    lang=lang, entities=entity_types, negation=False, ner_version=2,
+                    **{flag: method in nel_methods for method, flag in NEL_METHOD_FLAGS.items()},
                 )
             except Exception as exc:
                 # Everything _check_nel_registry can see was already checked, so
@@ -423,7 +500,7 @@ def main() -> None:
                 continue
 
         log.info("[%s] Running %s inference on %d document(s)...",
-                 lang, "NER + NEL" if args.nel else "NER", len(texts))
+                 lang, "NER + NEL" if with_nel else "NER", len(texts))
 
         raw = None
         if pipeline is not None:
@@ -438,7 +515,7 @@ def main() -> None:
         ann_rows: list[tuple[str, dict]] = []
         for (json_file, text, metadata), annotations in zip(loaded, flat):
             stem = json_file.stem
-            _write_ann(args.output / lang / "raw" / f"{stem}.ann", annotations, with_nel=args.nel)
+            _write_ann(args.output / lang / "raw" / f"{stem}.ann", annotations, with_nel=with_nel)
             _write_json(args.output / lang / "formatted" / f"{stem}.json",
                         text, annotations, metadata, formatter)
             log.info("[%s]   %s → %d annotation(s)", lang, json_file.name, len(annotations))
@@ -447,7 +524,7 @@ def main() -> None:
         processed_total += len(loaded)
 
         tsv_path = args.output / lang / f"{lang}.tsv"
-        _write_tsv(tsv_path, ann_rows, with_nel=args.nel)
+        _write_tsv(tsv_path, ann_rows, with_nel=with_nel)
         log.info("[%s] Combined TSV → %s", lang, tsv_path)
         log.info("[%s] Done.", lang)
 

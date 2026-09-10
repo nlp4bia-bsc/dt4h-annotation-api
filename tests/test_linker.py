@@ -66,6 +66,37 @@ def test_lexical_generators_require_their_index_path(gaz_path, model_path, faiss
         )
 
 
+def test_dense_can_be_switched_off_leaving_a_lexical_only_linker(
+    gaz_path, lexical_index_path
+):
+    """A lexical-only linker must not need the encoder or the FAISS index.
+
+    That is the whole point of offering the methods separately: no model_path,
+    no index_path, and no vector DB has to exist on disk for it to link.
+    """
+    linker = EntityLinker(
+        gaz_path=gaz_path,
+        dense=False,
+        exact_match=True,
+        tfidf_char=True,
+        lexical_index_path=lexical_index_path,
+    )
+    assert [g.method for g in linker.generators] == ["exact_match", "tfidf_char"]
+
+    linked = linker.link_texts(["COVID-19"])
+    assert linked["COVID-19"].code == "840539006"
+
+
+def test_dense_requires_its_model_and_index_paths(gaz_path):
+    with pytest.raises(ValueError, match="model_path and index_path"):
+        EntityLinker(gaz_path=gaz_path)
+
+
+def test_disabling_every_generator_is_rejected(gaz_path):
+    with pytest.raises(ValueError, match="at least one candidate generator"):
+        EntityLinker(gaz_path=gaz_path, dense=False)
+
+
 def test_every_generator_can_be_enabled_together(
     gaz_path, model_path, faiss_index_path, lexical_index_path
 ):

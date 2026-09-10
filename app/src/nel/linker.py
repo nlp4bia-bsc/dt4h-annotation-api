@@ -45,6 +45,14 @@ class EntityLinker:
     ----------
     gaz_path, model_path, index_path:
         Resources for the dense generator, resolved by ``LocalResolver``.
+        ``model_path`` and ``index_path`` are required only when ``dense`` is
+        on; a purely lexical linker needs the gazetteer and nothing else.
+    dense:
+        The bi-encoder retriever. On by default — it is the method this
+        pipeline was built around. Turning it off leaves the lexical
+        generators to link on their own, which is cheap and needs no FAISS
+        index, but recall then stops at what the gazetteer literally spells.
+        At least one generator must remain enabled.
     exact_match, tfidf_char, bm25:
         Additional candidate generators to fuse with the dense one.
         **All off by default, and turning any on changes which codes are
@@ -76,9 +84,10 @@ class EntityLinker:
     def __init__(
         self,
         gaz_path: Path,
-        model_path: Path,
-        index_path: Path,
+        model_path: Path | None = None,
+        index_path: Path | None = None,
         *,
+        dense: bool = True,
         exact_match: bool = False,
         tfidf_char: bool = False,
         bm25: bool = False,
@@ -100,10 +109,21 @@ class EntityLinker:
             raise ValueError(
                 "lexical_index_path is required when tfidf_char or bm25 is enabled"
             )
+        if dense and (model_path is None or index_path is None):
+            raise ValueError(
+                "model_path and index_path are required when dense is enabled"
+            )
+        if not (dense or exact_match or tfidf_char or bm25):
+            raise ValueError("at least one candidate generator must be enabled")
 
-        self.generators: list[CandidateGenerator] = [
-            DenseGenerator(gaz_path=gaz_path, model_path=model_path, index_path=index_path)
-        ]
+        # Construction order is fixed regardless of how the caller listed the
+        # generators: it is the tie-break _reportable_score falls back on, so
+        # it has to be a property of the class rather than of the call site.
+        self.generators: list[CandidateGenerator] = []
+        if dense:
+            self.generators.append(
+                DenseGenerator(gaz_path=gaz_path, model_path=model_path, index_path=index_path)
+            )
         if exact_match:
             self.generators.append(ExactMatchGenerator(gaz_path=gaz_path))
         if tfidf_char:

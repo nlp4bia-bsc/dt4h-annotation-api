@@ -403,6 +403,7 @@ uv run run_nerl.py -l es en                         # only these languages
 uv run run_nerl.py -e disease symptom               # only these entity types
 uv run run_nerl.py -i /path/to/input -o /path/out   # custom directories
 uv run run_nerl.py --nel                            # NER + entity linking
+uv run run_nerl.py --nel exact tfidf                # …with chosen NEL methods
 ```
 
 ### `--nel`
@@ -412,15 +413,44 @@ each one also carries a gazetteer `code`, the canonical `term` and a
 `nel_score`, produced by the same `BiencoderPipeline` the API uses (negation
 off — that stage is available over HTTP only).
 
-Linking needs more on disk than NER does: the NEL encoder, a gazetteer per
-entity type, and a **built vector DB** per entity type. Build them first with:
+#### Choosing the retrieval method
+
+`--nel` optionally takes the method(s) to link with. A bare `--nel` is the dense
+bi-encoder, which is what it has always meant:
+
+| Method | How it matches | Needs on disk |
+|---|---|---|
+| `dense` *(default)* | bi-encoder embeddings, nearest neighbour in the FAISS index | NEL encoder + built vector DB |
+| `exact` | equality on the normalised surface form | gazetteer only |
+| `tfidf` | character n-gram TF-IDF — tolerates typos and inflection | gazetteer only |
+| `bm25` | sparse BM25 over the gazetteer terms | gazetteer only |
 
 ```bash
-uv run test_init.py
+uv run run_nerl.py --nel                 # dense
+uv run run_nerl.py --nel exact           # exact match alone, no vector DB needed
+uv run run_nerl.py --nel dense tfidf     # both, combined by rank fusion
 ```
 
-If anything is missing the script names each item and skips that language,
-leaving the rest of the run intact:
+Naming more than one method fuses them with reciprocal rank fusion. The reported
+`nel_score` is then the similarity from whichever method ranked the winning code
+best — never the fusion score, which is a positional artefact that says nothing
+about match quality.
+
+> **Any method set other than the default changes which codes are emitted**, and
+> this repository has no evaluation harness to measure that. Validate a new
+> combination against a labelled set before trusting its output. The script logs
+> a warning whenever the methods are not the default.
+
+The three lexical methods share one sparse index, built automatically on first
+use from the gazetteer — there is no setup step for them. `dense` is the only
+method needing the NEL encoder and a prebuilt vector DB:
+
+```bash
+uv run python -m app.model_manager
+```
+
+If anything a chosen method needs is missing, the script names each item and
+skips that language, leaving the rest of the run intact:
 
 ```
 [es] NEL model not downloaded — run 'uv run python -m app.model_manager'.
@@ -428,8 +458,12 @@ leaving the rest of the run intact:
 [es] 2 NEL resource(s) unavailable — skip.
 ```
 
+A run that does not use `dense` is never gated on the encoder or the vector DB;
+only the gazetteers have to be in place.
+
 Editing a gazetteer after its index was built invalidates the index; that
 surfaces at load time and is fixed by rerunning `python -m app.model_manager`.
+The lexical index rebuilds itself in the same situation, without prompting.
 
 ### Input layout
 
@@ -507,7 +541,8 @@ Under `--nel` the flat files gain the linking columns — `code`, `term` on the
 `.ann` rows, and `code`, `term`, `nel_score` on the `.tsv`. They are absent
 rather than blank without the flag, so an empty code is never mistaken for an
 unlinked mention when the linking stage simply never ran. The CDM JSON has the
-fields either way, `null` when NER ran alone.
+fields either way, `null` when NER ran alone. Which method produced a code is
+not recorded in any of the three outputs.
 
 > **Note:** plain `.txt` input directories are no longer supported. Earlier
 > versions globbed `data/{lang}/*.txt` directly; `.txt` files are now read only

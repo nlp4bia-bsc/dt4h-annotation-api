@@ -227,6 +227,10 @@ class BiencoderPipeline(AnnotationPipeline):
     ner_version : int
         NER pre and postprocessing version to use. Model is called in the same
         way but inputs are chunked and postprocessed in the same way
+    dense : bool
+        The bi-encoder retriever, on by default. Off means no NEL model and no
+        FAISS index are opened or even resolved, so a lexical-only run needs
+        neither on disk. At least one generator must stay enabled.
     exact_match, tfidf_char, bm25 : bool
         Extra NEL candidate generators fused with the dense retriever, per
         entity type. All off by default. Enabling any **changes which codes
@@ -255,6 +259,7 @@ class BiencoderPipeline(AnnotationPipeline):
         entities: list[str],
         negation: bool=True,
         ner_version: int=2,
+        dense: bool=True,
         exact_match: bool=False,
         tfidf_char: bool=False,
         bm25: bool=False,
@@ -264,12 +269,25 @@ class BiencoderPipeline(AnnotationPipeline):
         self.lang = lang
         self.ner_version = ner_version
 
+        if not (dense or exact_match or tfidf_char or bm25):
+            raise ValueError("at least one NEL candidate generator must be enabled")
+
         self.resolver = LocalResolver()
-        _check_resources(self.resolver, lang, entities, need_ner=True, need_nel=True, need_vdb=True, negation=negation)
+        _check_resources(
+            self.resolver, lang, entities,
+            need_ner=True, need_nel=dense, need_vdb=dense, negation=negation,
+        )
         self.ner_paths = [self.resolver.get_ner_path(self.lang, e)[0] for e in (entities + ["negation"] if self.negation else entities)]
-        self.nel_path = self.resolver.get_nel_path(self.lang)[0]
         self.gaz_paths = [self.resolver.get_gaz_path(self.lang, e) for e in entities]
-        self.vdb_paths = [self.resolver.get_vector_db_path(self.lang, e)[0] for e in entities]
+
+        # Resolved only for a dense run: without it neither the encoder nor the
+        # index has to exist, and asking the resolver for them would fail a
+        # lexical-only run on resources it never intended to use.
+        self.nel_path = self.resolver.get_nel_path(self.lang)[0] if dense else None
+        self.vdb_paths = [
+            self.resolver.get_vector_db_path(self.lang, e)[0] if dense else None
+            for e in entities
+        ]
 
         # Resolved once and shared: a cross-encoder is language-scoped, not
         # entity-scoped, and get_reranker caches by path anyway.
@@ -283,6 +301,7 @@ class BiencoderPipeline(AnnotationPipeline):
                 gaz_path=gaz_path,
                 model_path=self.nel_path,
                 index_path=vdb_path,
+                dense=dense,
                 exact_match=exact_match,
                 tfidf_char=tfidf_char,
                 bm25=bm25,

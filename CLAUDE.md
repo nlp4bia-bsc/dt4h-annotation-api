@@ -25,8 +25,12 @@ uv run pytest
 uv run run_nerl.py
 uv run run_nerl.py -i data -o results -l es en -e disease symptom
 
-# Same, with entity linking (needs gazetteers + built vector DBs)
+# Same, with entity linking (dense; needs gazetteers + built vector DBs)
 uv run run_nerl.py --nel -l es -e disease symptom
+
+# Entity linking with other retrieval methods (gazetteer only, no vector DB)
+uv run run_nerl.py --nel exact -l es
+uv run run_nerl.py --nel dense tfidf bm25 -l es   # several = rank fusion
 
 # Run server
 uv run flask run --host=0.0.0.0 --port=5000
@@ -52,6 +56,11 @@ They share the pipeline and formatter code but nothing else.
 Under `--nel` it builds the same `BiencoderPipeline` the Flask route uses, with
 `negation=False`; the default mode calls `encoder_inference` alone and never
 imports the NEL stack.
+
+The CLI is the only front end that can pick the NEL retrieval methods: `--nel`
+takes an optional list drawn from `dense`, `exact`, `tfidf`, `bm25`
+(`NEL_METHOD_FLAGS` maps each to a `BiencoderPipeline` keyword), a bare `--nel`
+means `dense`, and naming several fuses them. Flask always gets the default.
 
 ## Flask request flow
 
@@ -118,11 +127,14 @@ Outputs per language: `results/{lang}/raw/{stem}.ann`,
 `nel_score` to the TSV; the columns are absent without it rather than empty, so
 a blank code never has to be read as "unlinked" when the stage never ran. The
 CDM JSON needs no switch — `Dt4hFormatter` fills the linking fields when they
-are present and emits nulls when they are not.
+are present and emits nulls when they are not. Which methods produced a code is
+not recorded in any output yet.
 
 Missing NEL resources abort that one language (message names each missing item)
 and the run continues; a language whose documents were all rejected never loads
-the index at all.
+the index at all. What counts as missing depends on the methods asked for:
+only `dense` needs the NEL encoder and a built vector DB, so a lexical-only run
+is gated on the gazetteers alone (`_check_nel_registry`).
 
 ## Key files
 
@@ -144,7 +156,7 @@ the index at all.
 | `app/model_manager/resolver.py` | `LocalResolver` — single source of truth for all resource paths |
 | `app/model_manager/default_registry.yaml` | Template registry with HuggingFace repo IDs |
 | `app/utils/results_postprocessing.py` | `merge_contiguous_entities`, `join_all_entities` |
-| `run_nerl.py` | Batch CDM JSON CLI — NER, or NER + NEL under `--nel` |
+| `run_nerl.py` | Batch CDM JSON CLI — NER, or NER + NEL under `--nel [METHOD ...]` |
 | `docs/cdm_open_questions.md` | Deferred CDM decisions and known gaps |
 
 ## CDM models
@@ -253,7 +265,7 @@ language has a `negation` entry, but most have `repo_id: null`.
 
 ## Tests
 
-`uv run pytest` — 130 tests, ~1.5s, fully offline. No `registry.yaml`, no
+`uv run pytest` — 142 tests, ~1.5s, fully offline. No `registry.yaml`, no
 `app/resources/`, no model download, no network.
 
 The NEL encoder is replaced by `tests/conftest.py:StubEncoder`, which embeds

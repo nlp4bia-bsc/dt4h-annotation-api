@@ -116,14 +116,20 @@ table.
 populated. Without the flag the script runs NER only and all of them stay
 `null` — the honest value for a stage that never ran.
 
-`--nel` needs a built vector database per language and entity type, which is
-why it is opt-in rather than the default: the setup step is heavier than a
-plain NER run assumes. `_check_nel_registry` reports each missing resource by
-name before the run touches a document.
+The default `--nel` method needs a built vector database per language and entity
+type, which is why linking is opt-in rather than the default: the setup step is
+heavier than a plain NER run assumes. `_check_nel_registry` reports each missing
+resource by name before the run touches a document, checking only what the
+chosen methods actually use.
 
 Still `null` in both modes: `controlled_vocabulary_namespace`,
 `controlled_vocabulary_version`, `controlled_vocabulary_source`,
 `nel_component_type`, `nel_component_version` — see §6, which blocks them all.
+
+**Newly open:** `--nel` now selects among `dense`, `exact`, `tfidf` and `bm25`,
+so an annotation's `code` no longer implies the bi-encoder produced it. Nothing
+in the output records which method won, and `nel_component_type` — the field
+that would carry it — is blocked on §6 along with the rest.
 
 ---
 
