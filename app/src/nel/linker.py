@@ -147,8 +147,10 @@ class EntityLinker:
         """Whether more than one generator's output is being combined."""
         return len(self.generators) > 1
 
-    def _reportable_score(self, fused: MatchCandidate) -> float:
-        """Replace an RRF score with something a reader can interpret.
+    def _best_source(self, fused: MatchCandidate) -> tuple[str | None, float]:
+        """Name the generator most responsible for a fused candidate, and its score.
+
+        Replaces an RRF score with something a reader can interpret.
 
         ``score`` leaves this class as ``nel_score`` and ends up in the CDM's
         ``concept_confidence``.  A raw RRF score cannot go there: it is a
@@ -173,18 +175,22 @@ class EntityLinker:
         scores are not on one scale.  ``metadata`` retains ``rrf_score``,
         ``source_scores`` and ``source_ranks`` so any decision remains
         traceable.
+
+        The winning method is returned alongside the score rather than being
+        recomputed later: it is the same choice, and the CDM's
+        ``nel_component_type`` has to agree with the score it sits next to.
         """
         source_scores = fused.metadata.get("source_scores", {})
         source_ranks = fused.metadata.get("source_ranks", {})
         if not source_scores:
-            return _clamp_confidence(fused.score)
+            return None, _clamp_confidence(fused.score)
 
         priority = {generator.method: position for position, generator in enumerate(self.generators)}
         best_method = min(
             source_scores,
             key=lambda method: (source_ranks.get(method, 1 << 30), priority.get(method, 1 << 30)),
         )
-        return _clamp_confidence(source_scores[best_method])
+        return best_method, _clamp_confidence(source_scores[best_method])
 
     def _shortlist(self, mentions: list[MentionAnnotation]) -> list[list[MatchCandidate]]:
         """Retrieve and fuse, returning a ranked shortlist per mention."""
@@ -217,7 +223,10 @@ class EntityLinker:
                 # Stash the RRF value and swap in an interpretable similarity
                 # while the per-source provenance is still attached.
                 candidate.metadata["rrf_score"] = candidate.score
-                candidate.score = self._reportable_score(candidate)
+                best_method, score = self._best_source(candidate)
+                candidate.score = score
+                if best_method is not None:
+                    candidate.metadata["source_method"] = best_method
             shortlists.append(fused)
         return shortlists
 

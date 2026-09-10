@@ -122,30 +122,57 @@ heavier than a plain NER run assumes. `_check_nel_registry` reports each missing
 resource by name before the run touches a document, checking only what the
 chosen methods actually use.
 
-Still `null` in both modes: `controlled_vocabulary_namespace`,
-`controlled_vocabulary_version`, `controlled_vocabulary_source`,
-`nel_component_type`, `nel_component_version` — see §6, which blocks them all.
-
-**Newly open:** `--nel` now selects among `dense`, `exact`, `tfidf` and `bm25`,
-so an annotation's `code` no longer implies the bi-encoder produced it. Nothing
-in the output records which method won, and `nel_component_type` — the field
-that would carry it — is blocked on §6 along with the rest.
+`controlled_vocabulary_namespace`, `controlled_vocabulary_version`,
+`controlled_vocabulary_source`, `nel_component_type`, `nel_component_version`
+and `dt4h_concept_identifier` are now populated too — see §6.
 
 ---
 
-## 6. Controlled-vocabulary namespace is not recorded
+## 6. Controlled-vocabulary namespace is hardcoded, not read from the gazetteer
 
-**Status:** blocked on per-gazetteer metadata.
+**Status:** resolved by decision, with a known limitation.
 
-`controlled_vocabulary_namespace` should say which terminology a code belongs to
-(`SNOMED CT`, `ICD10`, …). Gazetteers are registered in the registry as bare TSV
-paths with `term` and `code` columns and carry no indication of their
-terminology, and they are not all the same one.
+`controlled_vocabulary_namespace` says which terminology a code belongs to.
+Gazetteers are registered as bare TSV paths with `term` and `code` columns and
+carry no indication of their terminology, so there is nothing to read it from.
 
-**Current behaviour:** always `null`.
+**Current behaviour:** `Dt4hFormatter` derives it from the concept class —
+`UMLS` for `medication`, `SNOMED CT` for everything else — and pairs it with a
+fixed `controlled_vocabulary_version` of `2026`. `controlled_vocabulary_source`
+carries the namespace value as well; see the warning below.
 
-**Likely fix:** add a `namespace` (and `version`) key beside each gazetteer path
-in the registry, and thread it through `LocalResolver` into the NEL stage.
+**Limitation:** the rule is a property of the gazetteers as they stand today,
+not of the data. Registering a gazetteer in a different terminology, or a drug
+gazetteer that is not UMLS, silently mislabels every code it produces. The fix
+is the one this section always proposed — a `namespace` and `version` key beside
+each gazetteer path in the registry, threaded through `LocalResolver` — and the
+constants in `dt4h.py` are where that would replace them.
+
+**Also note:** `controlled_vocabulary_source` is set to the namespace, but the
+CDM defines that field as the provenance of the term (`original`,
+`machine translation`, `manual translation`). The value is therefore out of
+vocabulary and logs a warning on every linked annotation. This is a deliberate
+project decision; revisit it with the CDM authors rather than in code.
+
+---
+
+## 6b. `nel_component_type` describes the winning retriever only
+
+**Status:** resolved, with a granularity limit.
+
+`nel_component_type` is derived from the method that produced the winning code:
+`transformer` for the bi-encoder and the cross-encoder reranker,
+`lexical similarity` for `exact`, `tfidf` and `bm25`.
+
+**Limitation:** the CDM has one slot, so a fused run reports one method — the
+one that ranked the winning code best, the same one supplying
+`concept_confidence`. That a second retriever also voted for the code is not
+representable. The full provenance survives in `MatchCandidate.metadata`
+(`source_scores`, `source_ranks`, `rrf_score`) but reaches no output file.
+
+`ner_component_type` and `ner_component_version` remain `null`: the NER stage
+records nothing equivalent, and the checkpoint identity is not threaded from
+the registry into the formatter.
 
 ---
 

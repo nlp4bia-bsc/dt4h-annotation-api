@@ -182,6 +182,28 @@ NER-only runs (`run_nerl.py` without `--nel`) emit `concept_confidence: null`.
 `negation` is `null` when the negation model was not run, and only `"yes"`/`"no"`
 when an entity was actually assessed. Do not default it to `"no"`.
 
+Six linking fields are written by `_rename_annotation` only when the annotation
+carries a `code`, since each describes a link that may not exist:
+
+| Field | Value |
+|---|---|
+| `dt4h_concept_identifier` | the gazetteer code, same as `controlled_vocabulary_concept_identifier` |
+| `nel_component_type` | from `nel_method` via `NEL_COMPONENT_TYPE_MAP`; `null` when no method was recorded |
+| `nel_component_version` | constant `NEL_COMPONENT_VERSION` = `"1.2"` |
+| `controlled_vocabulary_namespace` | `UMLS` for `medication`, else `SNOMED CT` — keyed on the *mapped* `concept_class` |
+| `controlled_vocabulary_version` | constant `CONTROLLED_VOCABULARY_VERSION` = `"2026"` |
+| `controlled_vocabulary_source` | mirrors the namespace |
+
+`controlled_vocabulary_source` is deliberately out of vocabulary: the CDM
+defines it as `original`/`machine translation`/`manual translation`, so every
+linked annotation logs a warning. That is the agreed value, not a bug — do not
+"fix" it by silencing the validator.
+
+`nel_method` reaches the formatter from `biencoder_inference`, which reads
+`MatchCandidate.effective_method` — the winning generator, resolved through
+`metadata["source_method"]` when the candidate came out of RRF, since the bare
+`method` on a fused candidate is `"rrf"`.
+
 ## Registry and resource layout
 
 `app/config.py` points at the active registry YAML (`REGISTRY_PATH`) and resource
@@ -265,7 +287,7 @@ language has a `negation` entry, but most have `repo_id: null`.
 
 ## Tests
 
-`uv run pytest` — 142 tests, ~1.5s, fully offline. No `registry.yaml`, no
+`uv run pytest` — 164 tests, ~1.5s, fully offline. No `registry.yaml`, no
 `app/resources/`, no model download, no network.
 
 The NEL encoder is replaced by `tests/conftest.py:StubEncoder`, which embeds

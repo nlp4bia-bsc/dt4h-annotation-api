@@ -13,8 +13,18 @@ from __future__ import annotations
 
 import pytest
 
-from app.src.format.data_structures import CONCEPT_CLASSES
-from app.src.format.dt4h import CONCEPT_CLASS_MAP, Dt4hFormatter
+from app.src.format.data_structures import (
+    CONCEPT_CLASSES,
+    NEL_COMPONENT_TYPES,
+    Annotation,
+)
+from app.src.format.dt4h import (
+    CONCEPT_CLASS_MAP,
+    CONTROLLED_VOCABULARY_VERSION,
+    NEL_COMPONENT_TYPE_MAP,
+    NEL_COMPONENT_VERSION,
+    Dt4hFormatter,
+)
 
 LINKED = {
     "ner_class": "DISEASE",
@@ -25,6 +35,7 @@ LINKED = {
     "code": "840539006",
     "term": "COVID-19",
     "nel_score": 0.9421,
+    "nel_method": "biencoder",
 }
 
 NER_ONLY = {
@@ -61,6 +72,97 @@ def test_ner_only_annotations_do_not_raise(formatter):
     renamed = formatter._rename_annotation(NER_ONLY)
     assert renamed["controlled_vocabulary_concept_identifier"] is None
     assert renamed["controlled_vocabulary_concept_official_term"] is None
+
+
+# ---------------------------------------------------------------------------
+# Linking fields
+# ---------------------------------------------------------------------------
+
+
+def test_dt4h_concept_identifier_is_the_gazetteer_code(formatter):
+    renamed = formatter._rename_annotation(LINKED)
+    assert renamed["dt4h_concept_identifier"] == "840539006"
+    assert renamed["dt4h_concept_identifier"] == renamed["controlled_vocabulary_concept_identifier"]
+
+
+def test_linked_annotations_carry_the_vocabulary_constants(formatter):
+    renamed = formatter._rename_annotation(LINKED)
+    assert renamed["controlled_vocabulary_version"] == CONTROLLED_VOCABULARY_VERSION
+    assert renamed["nel_component_version"] == NEL_COMPONENT_VERSION
+
+
+@pytest.mark.parametrize(
+    "label, expected_namespace",
+    [
+        ("DISEASE", "SNOMED CT"),
+        ("SYMPTOM", "SNOMED CT"),
+        ("PROCEDURE", "SNOMED CT"),
+        ("DRUG", "UMLS"),
+        ("MEDICATION", "UMLS"),
+        ("medicamento", "UMLS"),  # the Spanish checkpoints' own label
+    ],
+)
+def test_namespace_is_umls_for_drugs_and_snomed_otherwise(
+    formatter, label, expected_namespace
+):
+    """Keyed on the *mapped* class, so every alias of 'drug' resolves alike."""
+    renamed = formatter._rename_annotation({**LINKED, "ner_class": label})
+    assert renamed["controlled_vocabulary_namespace"] == expected_namespace
+
+
+def test_source_mirrors_the_namespace(formatter):
+    """A project decision, not the CDM's own reading of the field.
+
+    ``controlled_vocabulary_source`` is documented as the provenance of the
+    term; carrying the terminology name means the validator warns on every
+    linked annotation. Pinned here so the warning is never mistaken for a bug.
+    """
+    for label in ("DISEASE", "DRUG"):
+        renamed = formatter._rename_annotation({**LINKED, "ner_class": label})
+        assert renamed["controlled_vocabulary_source"] == renamed["controlled_vocabulary_namespace"]
+
+
+def test_unlinked_annotations_carry_no_vocabulary_fields(formatter):
+    """These describe a code. Without one there is nothing to describe."""
+    renamed = formatter._rename_annotation(NER_ONLY)
+    for cdm_field in (
+        "dt4h_concept_identifier",
+        "controlled_vocabulary_namespace",
+        "controlled_vocabulary_version",
+        "controlled_vocabulary_source",
+        "nel_component_type",
+        "nel_component_version",
+    ):
+        assert Annotation(**renamed).model_dump()[cdm_field] is None
+
+
+@pytest.mark.parametrize(
+    "method, expected",
+    [
+        ("biencoder", "transformer"),
+        ("cross_encoder", "transformer"),
+        ("exact_match", "lexical similarity"),
+        ("tfidf_char", "lexical similarity"),
+        ("bm25", "lexical similarity"),
+        ("something_new", "other"),
+    ],
+)
+def test_nel_component_type_follows_the_method_that_won(formatter, method, expected):
+    renamed = formatter._rename_annotation({**LINKED, "nel_method": method})
+    assert renamed["nel_component_type"] == expected
+
+
+def test_every_mapped_component_type_is_a_cdm_value():
+    for value in NEL_COMPONENT_TYPE_MAP.values():
+        assert value in NEL_COMPONENT_TYPES
+
+
+def test_a_link_with_no_recorded_method_leaves_the_type_null(formatter):
+    """'other' would assert a kind of component; not knowing is not a kind."""
+    linked_without_method = {k: v for k, v in LINKED.items() if k != "nel_method"}
+    renamed = formatter._rename_annotation(linked_without_method)
+    assert Annotation(**renamed).model_dump()["nel_component_type"] is None
+    assert renamed["nel_component_version"] == NEL_COMPONENT_VERSION
 
 
 def test_span_fields_map_across(formatter):

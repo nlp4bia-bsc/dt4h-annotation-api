@@ -9,7 +9,7 @@ def biencoder_inference(
     ner_results: list[list[list[dict]]],
     linkers: list[EntityLinker],
 ) -> list[list[list[dict]]]:
-    """Add ``code``, ``term`` and ``nel_score`` to every annotation.
+    """Add ``code``, ``term``, ``nel_score`` and ``nel_method`` to every annotation.
 
     Parameters
     ----------
@@ -54,5 +54,9 @@ def biencoder_inference(
                     ann["code"] = candidate.code
                     ann["term"] = candidate.term
                     ann["nel_score"] = round(candidate.score, 4)
+                    # Which retriever won, not which ones ran: with the methods
+                    # now selectable per run, a code no longer implies the
+                    # bi-encoder produced it. Becomes nel_component_type.
+                    ann["nel_method"] = candidate.effective_method
 
     return ner_results

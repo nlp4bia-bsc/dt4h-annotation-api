@@ -24,6 +24,10 @@ The table below shows how raw pipeline fields map to CDM fields:
 +----------------------+---------------------------------------------------+----------------------------------+
 | ``code``             | ``controlled_vocabulary_concept_identifier``      | absent for NER-only pipelines    |
 +----------------------+---------------------------------------------------+----------------------------------+
+| ``code``             | ``dt4h_concept_identifier``                       | same value, see "Linking fields" |
++----------------------+---------------------------------------------------+----------------------------------+
+| ``nel_method``       | ``nel_component_type``                            | mapped, see "Linking fields"     |
++----------------------+---------------------------------------------------+----------------------------------+
 | ``term``             | ``controlled_vocabulary_concept_official_term``   | absent for NER-only pipelines    |
 +----------------------+---------------------------------------------------+----------------------------------+
 | ``is_negated``       | ``negation``                                      | bool → ``"yes"`` / ``"no"``      |
@@ -58,6 +62,39 @@ NER-only pipelines (``run_nerl.py``) produce no ``nel_score``, so they emit
 ``concept_confidence: null``.  That is the honest value: no linking claim was
 made, and the field must not be back-filled with an extraction score, which
 measures something else entirely.
+
+Linking fields
+--------------
+Six further CDM fields are written whenever an annotation carries a ``code``,
+and left ``null`` when it does not — they describe a link, so an unlinked
+mention must not carry them:
+
+* ``dt4h_concept_identifier`` — the gazetteer code, the same value as
+  ``controlled_vocabulary_concept_identifier``.  The CDM keeps the two apart so
+  a project-local identifier can differ from the terminology's own; here the
+  gazetteer supplies both.
+* ``nel_component_type`` — derived from ``nel_method``, which names the
+  retriever that actually produced the winning code.  Since the retrieval
+  methods became selectable per run, a code no longer implies the bi-encoder
+  found it: ``NEL_COMPONENT_TYPE_MAP`` splits them into ``transformer`` and
+  ``lexical similarity``.  An annotation with no recorded method leaves the
+  field ``null`` rather than claiming ``other``.
+* ``nel_component_version`` — the constant ``NEL_COMPONENT_VERSION``.
+* ``controlled_vocabulary_namespace`` — ``UMLS`` for ``medication``,
+  ``SNOMED CT`` for every other concept class, keyed on the *mapped* class so
+  the registry's ``drug`` and the checkpoints' ``medicamento`` resolve alike.
+* ``controlled_vocabulary_version`` — the constant
+  ``CONTROLLED_VOCABULARY_VERSION``.
+* ``controlled_vocabulary_source`` — set to the same value as the namespace.
+
+  .. warning::
+     The CDM documents this field as the *provenance of the term*
+     (``original`` | ``machine translation`` | ``manual translation``), not the
+     terminology it came from — that is what the namespace field is for.  A
+     namespace value here is out of vocabulary, so ``ControlledVocabSource``
+     logs a warning for **every linked annotation**.  This is a deliberate
+     project decision; change ``controlled_vocabulary_source`` in
+     ``_rename_annotation`` to ``"original"`` to follow the CDM instead.
 
 Not assessed vs. assessed-negative
 ----------------------------------
@@ -133,6 +170,46 @@ CONCEPT_CLASS_MAP: dict[str, str] = {
 #: BIO tagging prefix left on a label when the HF pipeline aggregates with
 #: ``aggregation_strategy="none"``.
 _BIO_PREFIX = re.compile(r"^[BIOES]-")
+
+
+# ---------------------------------------------------------------------------
+# Linking provenance
+# ---------------------------------------------------------------------------
+
+#: Raw ``nel_method`` (a generator's ``method`` attribute, or the reranker's)
+#: → CDM ``nel_component_type``.  The CDM vocabulary has three values and the
+#: split is by *kind of model*, not by algorithm: anything that embeds text with
+#: a neural network is ``transformer``, anything comparing surface strings is
+#: ``lexical similarity``.
+NEL_COMPONENT_TYPE_MAP: dict[str, str] = {
+    "biencoder":     "transformer",
+    "cross_encoder": "transformer",
+    "exact_match":   "lexical similarity",
+    "tfidf_char":    "lexical similarity",
+    "bm25":          "lexical similarity",
+}
+
+#: Version of the linking component, reported for every linked annotation.
+NEL_COMPONENT_VERSION = "1.2"
+
+#: Terminology the gazetteer codes belong to.  The drug gazetteer is UMLS;
+#: every other entity type is SNOMED CT.  Keyed by CDM ``concept_class``, which
+#: is where ``_to_concept_class`` has already resolved the registry's ``drug``
+#: and the checkpoints' ``medicamento`` to the single value ``medication``.
+VOCABULARY_NAMESPACE_BY_CONCEPT_CLASS: dict[str, str] = {
+    "medication": "UMLS",
+}
+DEFAULT_VOCABULARY_NAMESPACE = "SNOMED CT"
+
+#: Edition/release of the terminologies above.
+CONTROLLED_VOCABULARY_VERSION = "2026"
+
+
+def _vocabulary_namespace(concept_class) -> str:
+    """The terminology a code of this concept class comes from."""
+    return VOCABULARY_NAMESPACE_BY_CONCEPT_CLASS.get(
+        concept_class, DEFAULT_VOCABULARY_NAMESPACE
+    )
 
 
 def _normalise_label(label: str) -> str:
@@ -312,9 +389,27 @@ class Dt4hFormatter(DataFormatter):
         # --- Linking (absent for NER-only pipelines) ---
         # concept_confidence is the *linking* confidence; a run with no NEL
         # stage emits null rather than falling back to the extraction score.
+        code = ann.get("code")
         renamed["concept_confidence"] = ann.get("nel_score")
-        renamed["controlled_vocabulary_concept_identifier"] = ann.get("code")
+        renamed["controlled_vocabulary_concept_identifier"] = code
         renamed["controlled_vocabulary_concept_official_term"] = ann.get("term")
+
+        # The remaining linking fields describe a code, so they are written only
+        # when there is one. Emitting a namespace and a vocabulary version for
+        # an unlinked mention would describe a lookup that never happened.
+        if code is not None:
+            renamed["dt4h_concept_identifier"] = code
+            namespace = _vocabulary_namespace(renamed["concept_class"])
+            renamed["controlled_vocabulary_namespace"] = namespace
+            renamed["controlled_vocabulary_version"] = CONTROLLED_VOCABULARY_VERSION
+            renamed["controlled_vocabulary_source"] = namespace
+            renamed["nel_component_version"] = NEL_COMPONENT_VERSION
+
+            # Left null when the pipeline recorded no method: 'other' would
+            # assert a kind of component, and not knowing is not a kind.
+            method = ann.get("nel_method")
+            if method is not None:
+                renamed["nel_component_type"] = NEL_COMPONENT_TYPE_MAP.get(method, "other")
 
         # --- Negation (absent when the negation model was not run) ---
         if "is_negated" in ann:

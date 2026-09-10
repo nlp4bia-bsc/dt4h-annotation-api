@@ -281,8 +281,14 @@ produced by the pipeline are emitted as `null` rather than omitted:
         "concept_confidence":                          0.9999,
         "negation":                                    "no",
         "negation_confidence":                         0.0,
+        "dt4h_concept_identifier":                     "64882008",
+        "nel_component_type":                          "transformer",
+        "nel_component_version":                       "1.2",
+        "controlled_vocabulary_namespace":             "SNOMED CT",
+        "controlled_vocabulary_version":               "2026",
         "controlled_vocabulary_concept_identifier":    "64882008",
         "controlled_vocabulary_concept_official_term": "fiebre",
+        "controlled_vocabulary_source":                "SNOMED CT",
         "...":                                         "remaining CDM annotation fields"
       }
     ],
@@ -299,20 +305,41 @@ produced by the pipeline are emitted as `null` rather than omitted:
 
 Notes on specific fields:
 
-- **`concept_confidence`** is the **NER extraction** confidence. The CDM defines
-  one confidence slot per annotation, and its position (immediately before the
-  `ner_component_*` fields) marks it as the extraction score. The entity-linking
-  score has no CDM field and is not serialised — see
+- **`concept_confidence`** is the **entity-linking** confidence — how sure the
+  pipeline is that the mention maps to the emitted code. The CDM has one
+  confidence slot per annotation, so the NER extraction score has nowhere to go
+  and is not serialised; see
   [`docs/cdm_open_questions.md`](docs/cdm_open_questions.md).
 - **`negation`** is `null` when the negation model was not run, and `"yes"` /
   `"no"` only for entities that were actually assessed. An unassessed entity is
   never reported as `"no"`.
-- **`concept_class`** is passed through verbatim from the NER model's own label.
-  The CDM values are `"symptom"`, `"disorder/disease"`, `"procedure"`,
-  `"medication"`, `"cardiology entity"`, `"other"`; a label outside that set logs
-  a warning and is emitted unchanged.
-- Controlled-vocabulary fields are only populated when a NEL stage ran. In
-  `run_nerl.py` that means `--nel`; without it they are `null`.
+- **`concept_class`** is the NER model's own label mapped onto the CDM
+  vocabulary — `"symptom"`, `"disorder/disease"`, `"procedure"`,
+  `"medication"`, `"cardiology entity"`, `"other"` — by `CONCEPT_CLASS_MAP`,
+  which covers the English and Spanish checkpoint labels and the registry's own
+  entity names. A label the table does not know is passed through unchanged and
+  logs a warning, so an unmapped checkpoint stays visible.
+- **`nel_component_type`** follows the retrieval method that produced the code:
+  `"transformer"` for the bi-encoder or a cross-encoder reranker,
+  `"lexical similarity"` for `exact`, `tfidf` and `bm25`. In a fused run it is
+  the method that ranked the winning code best — the same one whose score is
+  reported as `concept_confidence`.
+- **`controlled_vocabulary_namespace`** is `"UMLS"` for `medication` and
+  `"SNOMED CT"` for every other concept class, matching how the gazetteers are
+  built. `controlled_vocabulary_version` and `nel_component_version` are fixed
+  values (`"2026"` and `"1.2"`).
+- **`controlled_vocabulary_source`** carries the same value as the namespace.
+  This is a project decision, not the CDM's own reading: the CDM documents the
+  field as the provenance of the term (`"original"`, `"machine translation"`,
+  `"manual translation"`), so the value is out of vocabulary and logs a warning
+  for every linked annotation. The warning is expected here, not a defect.
+- **`dt4h_concept_identifier`** repeats the gazetteer code. The CDM keeps it
+  separate so a project-local identifier can differ from the terminology's own;
+  here one gazetteer supplies both.
+- All of the fields above that describe a code are populated only when a NEL
+  stage ran **and** that mention was linked. In `run_nerl.py` that means
+  `--nel`; without it they are `null`, and an unlinked mention in a `--nel` run
+  is `null` too.
 
 ---
 

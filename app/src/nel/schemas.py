@@ -58,3 +58,18 @@ class MatchCandidate:
     method: str
     rank: int | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def effective_method(self) -> str:
+        """The retrieval method actually responsible for this candidate.
+
+        ``method`` is ``"rrf"`` on a fused candidate, which names the
+        combination step rather than a retriever — useless to a consumer asking
+        *how* the code was found.  ``EntityLinker`` records the generator that
+        ranked the winning code best under ``metadata["source_method"]``, and
+        that is the answer here.  A reranked candidate reports the reranker,
+        which is correct: when a cross-encoder runs it owns the decision.
+        """
+        if self.method == "rrf":
+            return self.metadata.get("source_method", self.method)
+        return self.method
