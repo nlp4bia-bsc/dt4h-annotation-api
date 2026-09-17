@@ -19,8 +19,9 @@ A Flask REST API that chains **Named Entity Recognition (NER)**, **Named Entity 
    - [POST /sync_models](#post-sync_models)
 7. [Response Schema](#response-schema)
 8. [Examples](#examples)
-9. [Docker](#docker)
-10. [Architecture](#architecture)
+9. [Batch Processing (`run_nerl.py`)](#batch-processing-run_nerlpy)
+10. [Docker](#docker)
+11. [Architecture](#architecture)
 
 ---
 
@@ -47,8 +48,20 @@ All model and resource paths are managed through a **registry YAML file**. The p
 ```python
 # app/config.py
 REGISTRY_PATH = "app/model_manager/registry.yaml"
-RESOURCES_PATH = "app/model_manager/resources"
+RESOURCES_PATH = "app/resources"
 ```
+
+Only `default_registry.yaml` is committed — `registry.yaml` is gitignored, since it
+gets rewritten with local paths as models are downloaded. Create it before the
+first run:
+
+```bash
+cp app/model_manager/default_registry.yaml app/model_manager/registry.yaml
+```
+
+If it is missing, `LocalResolver` logs an error and falls back to an empty
+registry, which presents as "no entity types registered" for every language
+rather than as a hard failure.
 
 ### Registry structure
 
@@ -79,7 +92,7 @@ gazetteers:
 
 vectorized_dbs:
   es:
-    disease: null   # built automatically on first run
+    disease: null   # built by 'python -m app.model_manager'
     symptom: null
 ```
 
@@ -90,9 +103,10 @@ vectorized_dbs:
 - **Disk layout** for auto-derived paths (i.e. when `local_path` is `null`):
   - NER: `{RESOURCES_PATH}/local_models/ner_models/{entity}/{model_name}/`
   - NEL: `{RESOURCES_PATH}/local_models/nel_models/{model_name}/`
-  - Vector DBs: `{RESOURCES_PATH}/vectorized_dbs/{lang}/{entity}_{nel_model_name}.pt`
+  - Vector DBs: `{RESOURCES_PATH}/vectorized_dbs/{lang}/{entity}_{nel_model_name}.faiss`
+    (each with a sibling `.faiss.manifest.json`)
 - **Gazetteers** must be placed manually. Each must be a TSV file with at minimum a `term` column and a `code` column. Setting a gazetteer entry to `null` is safe — the model manager and pipeline pre-flight check will skip it rather than crash. Requests for an entity with a missing or unconfigured gazetteer will fail with a clear error listing all absent resources.
-- **Vector databases** are built automatically from the gazetteer + NEL model on the first request. Once built, the path is written back to the registry so subsequent startups skip the build step. To force a rebuild, set the relevant entry to `null` in the registry.
+- **Vector databases** are built from the gazetteer + NEL model by `python -m app.model_manager`, **not** on demand at request time: a pipeline whose index is missing refuses to start rather than building one mid-request. Once built, the path is written back to the registry so subsequent startups skip the build step. To force a rebuild, set the relevant entry to `null` in the registry and rerun the model manager.
 - If a model already exists locally (e.g. pre-downloaded or manually placed), set `local_path` directly and leave `repo_id: null` — no download will be attempted.
 - Swapping the NEL model produces a new vector DB filename automatically, triggering a rebuild.
 
@@ -114,7 +128,7 @@ uv run python -m app.model_manager
 
 ### 2. Pre-flight pipeline check
 
-After downloading models, run the standalone validation script to verify end-to-end pipeline correctness and pre-build any missing vector databases (GPU strongly preferred for this step):
+After downloading models, run the standalone validation script to verify end-to-end pipeline correctness (GPU strongly preferred for this step). It builds nothing — step 1 must have produced the vector DBs already:
 
 ```bash
 uv run test_init.py
@@ -126,7 +140,7 @@ If any required resource is absent — NER/NEL model not downloaded, gazetteer n
 RuntimeError: Cannot start pipeline — 3 resource(s) unavailable:
   • NER es/disease: not downloaded — run 'python -m app.model_manager'
   • NEL es: not downloaded — run 'python -m app.model_manager'
-  • Vector DB es/disease: not built — run 'uv run test_init.py'
+  • Vector DB es/disease: not built — run 'uv run python -m app.model_manager'
 ```
 
 The same pre-flight check runs whenever a pipeline is first instantiated at inference time.
@@ -238,34 +252,44 @@ curl -X POST http://localhost:5000/sync_models
 
 ## Response Schema
 
-Each result object follows the DT4H CDM v2 (`NlpResponse`) structure:
+Each result object follows the DT4H CDM (`NlpResponse`) structure. Fields not
+produced by the pipeline are emitted as `null` rather than omitted:
 
 ```json
 {
   "nlp_output": {
     "record_metadata": {
+      "clinical_site_id":                 "SITE-1",
       "patient_id":                       "P1",
       "admission_id":                     "A1",
+      "record_id":                        42,
+      "deidentified":                     "yes",
+      "deidentification_pipeline_name":   "deid",
+      "deidentification_pipeline_version":"2.1",
       "text":                             "<original input text>",
-      "nlp_processing_date":              "2026-05-08T18:13:39.693396",
+      "nlp_processing_date":              "2026-05-08T18:13:39.693+02:00",
       "nlp_processing_pipeline_name":     "Dt4hFormatter",
       "nlp_processing_pipeline_version":  "1.0",
-      "..."
+      "...":                              "remaining CDM metadata fields"
     },
     "annotations": [
       {
-        "concept_class":          "symptom",
-        "start_offset":           18,
-        "end_offset":             24,
-        "mention_string":         "fiebre",
-        "extraction_confidence":  0.9999,
-        "concept_str":            "fiebre",
-        "concept_code":           "64882008",
-        "concept_confidence":     1.0,
-        "negation":               "no",
-        "negation_confidence":    0.0,
-        "uncertainty":            "no",
-        "uncertainty_confidence": 0.0
+        "concept_class":                               "symptom",
+        "start_offset":                                18,
+        "end_offset":                                  24,
+        "concept_mention_string":                      "fiebre",
+        "concept_confidence":                          0.9999,
+        "negation":                                    "no",
+        "negation_confidence":                         0.0,
+        "dt4h_concept_identifier":                     "64882008",
+        "nel_component_type":                          "transformer",
+        "nel_component_version":                       "1.2",
+        "controlled_vocabulary_namespace":             "SNOMED CT",
+        "controlled_vocabulary_version":               "2026",
+        "controlled_vocabulary_concept_identifier":    "64882008",
+        "controlled_vocabulary_concept_official_term": "fiebre",
+        "controlled_vocabulary_source":                "SNOMED CT",
+        "...":                                         "remaining CDM annotation fields"
       }
     ],
     "processing_success": true
@@ -279,7 +303,43 @@ Each result object follows the DT4H CDM v2 (`NlpResponse`) structure:
 }
 ```
 
-`concept_class` values: `"symptom"`, `"disorder/disease"`, `"procedure"`, `"medication"`.
+Notes on specific fields:
+
+- **`concept_confidence`** is the **entity-linking** confidence — how sure the
+  pipeline is that the mention maps to the emitted code. The CDM has one
+  confidence slot per annotation, so the NER extraction score has nowhere to go
+  and is not serialised; see
+  [`docs/cdm_open_questions.md`](docs/cdm_open_questions.md).
+- **`negation`** is `null` when the negation model was not run, and `"yes"` /
+  `"no"` only for entities that were actually assessed. An unassessed entity is
+  never reported as `"no"`.
+- **`concept_class`** is the NER model's own label mapped onto the CDM
+  vocabulary — `"symptom"`, `"disorder/disease"`, `"procedure"`,
+  `"medication"`, `"cardiology entity"`, `"other"` — by `CONCEPT_CLASS_MAP`,
+  which covers the English and Spanish checkpoint labels and the registry's own
+  entity names. A label the table does not know is passed through unchanged and
+  logs a warning, so an unmapped checkpoint stays visible.
+- **`nel_component_type`** follows the retrieval method that produced the code:
+  `"transformer"` for the bi-encoder or a cross-encoder reranker,
+  `"lexical similarity"` for `exact`, `tfidf` and `bm25`. In a fused run it is
+  the method that ranked the winning code best — the same one whose score is
+  reported as `concept_confidence`.
+- **`controlled_vocabulary_namespace`** is `"UMLS"` for `medication` and
+  `"SNOMED CT"` for every other concept class, matching how the gazetteers are
+  built. `controlled_vocabulary_version` and `nel_component_version` are fixed
+  values (`"2026"` and `"1.2"`).
+- **`controlled_vocabulary_source`** carries the same value as the namespace.
+  This is a project decision, not the CDM's own reading: the CDM documents the
+  field as the provenance of the term (`"original"`, `"machine translation"`,
+  `"manual translation"`), so the value is out of vocabulary and logs a warning
+  for every linked annotation. The warning is expected here, not a defect.
+- **`dt4h_concept_identifier`** repeats the gazetteer code. The CDM keeps it
+  separate so a project-local identifier can differ from the terminology's own;
+  here one gazetteer supplies both.
+- All of the fields above that describe a code are populated only when a NEL
+  stage ran **and** that mention was linked. In `run_nerl.py` that means
+  `--nel`; without it they are `null`, and an unlinked mention in a `--nel` run
+  is `null` too.
 
 ---
 
@@ -355,6 +415,165 @@ curl -X POST "http://localhost:5000/process_bulk?language=es&entities=disease,sy
 ```
 
 Entities in a negated context will have `"negation": "yes"` and a non-zero `negation_confidence`.
+
+---
+
+## Batch Processing (`run_nerl.py`)
+
+`run_nerl.py` annotates CDM JSON documents straight from the filesystem. It does
+**not** go through the API — it imports the pipeline directly. By default it runs
+**NER only**; `--nel` adds entity linking.
+
+```bash
+uv run run_nerl.py                                  # all languages under data/
+uv run run_nerl.py -l es en                         # only these languages
+uv run run_nerl.py -e disease symptom               # only these entity types
+uv run run_nerl.py -i /path/to/input -o /path/out   # custom directories
+uv run run_nerl.py --nel                            # NER + entity linking
+uv run run_nerl.py --nel exact tfidf                # …with chosen NEL methods
+```
+
+### `--nel`
+
+Without the flag, annotations carry only the span and its NER score. With it,
+each one also carries a gazetteer `code`, the canonical `term` and a
+`nel_score`, produced by the same `BiencoderPipeline` the API uses (negation
+off — that stage is available over HTTP only).
+
+#### Choosing the retrieval method
+
+`--nel` optionally takes the method(s) to link with. A bare `--nel` is the dense
+bi-encoder, which is what it has always meant:
+
+| Method | How it matches | Needs on disk |
+|---|---|---|
+| `dense` *(default)* | bi-encoder embeddings, nearest neighbour in the FAISS index | NEL encoder + built vector DB |
+| `exact` | equality on the normalised surface form | gazetteer only |
+| `tfidf` | character n-gram TF-IDF — tolerates typos and inflection | gazetteer only |
+| `bm25` | sparse BM25 over the gazetteer terms | gazetteer only |
+
+```bash
+uv run run_nerl.py --nel                 # dense
+uv run run_nerl.py --nel exact           # exact match alone, no vector DB needed
+uv run run_nerl.py --nel dense tfidf     # both, combined by rank fusion
+```
+
+Naming more than one method fuses them with reciprocal rank fusion. The reported
+`nel_score` is then the similarity from whichever method ranked the winning code
+best — never the fusion score, which is a positional artefact that says nothing
+about match quality.
+
+> **Any method set other than the default changes which codes are emitted**, and
+> this repository has no evaluation harness to measure that. Validate a new
+> combination against a labelled set before trusting its output. The script logs
+> a warning whenever the methods are not the default.
+
+The three lexical methods share one sparse index, built automatically on first
+use from the gazetteer — there is no setup step for them. `dense` is the only
+method needing the NEL encoder and a prebuilt vector DB:
+
+```bash
+uv run python -m app.model_manager
+```
+
+If anything a chosen method needs is missing, the script names each item and
+skips that language, leaving the rest of the run intact:
+
+```
+[es] NEL model not downloaded — run 'uv run python -m app.model_manager'.
+[es] 'symptom' vector DB not built — run 'uv run python -m app.model_manager' to build it.
+[es] 2 NEL resource(s) unavailable — skip.
+```
+
+A run that does not use `dense` is never gated on the encoder or the vector DB;
+only the gazetteers have to be in place.
+
+Editing a gazetteer after its index was built invalidates the index; that
+surfaces at load time and is fixed by rerunning `python -m app.model_manager`.
+The lexical index rebuilds itself in the same situation, without prompting.
+
+### Input layout
+
+One subdirectory per language, named by language code. The directory name
+selects the models, so it is authoritative.
+
+```
+data/
+└── es/
+    ├── doc1.json          # text inline
+    ├── doc2.json          # text empty …
+    └── doc2.txt           # … so it is read from here
+```
+
+Input files use the same CDM schema the script emits, with `annotations` left to
+be filled in. Only `nlp_output.record_metadata` is read — any `annotations`,
+`processing_success` or `nlp_service_info` present in the input are ignored.
+
+```json
+{
+  "nlp_output": {
+    "record_metadata": {
+      "clinical_site_id":                  "SITE-1",
+      "patient_id":                        "P1",
+      "admission_id":                      "A1",
+      "record_id":                         42,
+      "deidentified":                      "yes",
+      "deidentification_pipeline_name":    "deid",
+      "deidentification_pipeline_version": "2.1",
+      "report_language":                   "es",
+      "text":                              ""
+    }
+  }
+}
+```
+
+**Text resolution.** If `record_metadata.text` is non-blank it is used as-is.
+Otherwise the script reads the sibling `.txt` file — `doc2.json` pairs with
+`doc2.txt` in the same directory. Inline text always wins when both exist.
+
+**Mandatory metadata.** These seven fields are required; a document missing any
+of them is rejected:
+
+`clinical_site_id`, `patient_id`, `admission_id`, `record_id`, `deidentified`,
+`deidentification_pipeline_name`, `deidentification_pipeline_version`
+
+**Rejection.** A document is rejected — the reason is logged, the document is
+skipped and counted, and the run continues with the rest of the batch — when:
+
+| Condition | Example message |
+|---|---|
+| Malformed JSON | `malformed JSON (Expecting property name…)` |
+| Missing mandatory field | `invalid CDM metadata — …record_id: Field required` |
+| Language mismatch | `report_language is 'ca' but the file is in the 'es' directory` |
+| No text anywhere | `'text' is empty and no sibling doc2.txt exists` |
+| Empty sidecar | `sibling doc2.txt is empty` |
+
+`report_language` is only checked when present; the language directory always
+wins on model selection.
+
+A run ends with a tally, e.g. `All languages processed — 48 document(s)
+annotated, 2 rejected.`
+
+### Output layout
+
+```
+results/
+└── es/
+    ├── raw/doc1.ann          # TSV: label, start, end, span
+    ├── formatted/doc1.json   # full CDM document
+    └── es.tsv                # every annotation, sorted by filename then offset
+```
+
+Under `--nel` the flat files gain the linking columns — `code`, `term` on the
+`.ann` rows, and `code`, `term`, `nel_score` on the `.tsv`. They are absent
+rather than blank without the flag, so an empty code is never mistaken for an
+unlinked mention when the linking stage simply never ran. The CDM JSON has the
+fields either way, `null` when NER ran alone. Which method produced a code is
+not recorded in any of the three outputs.
+
+> **Note:** plain `.txt` input directories are no longer supported. Earlier
+> versions globbed `data/{lang}/*.txt` directly; `.txt` files are now read only
+> as the sidecar of a CDM JSON document.
 
 ---
 

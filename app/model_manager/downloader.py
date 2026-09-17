@@ -3,16 +3,13 @@ from __future__ import annotations
 import csv
 import gc
 import logging
-import time
 from pathlib import Path
 from typing import Optional
 
-import pandas as pd
 import torch
 from huggingface_hub import snapshot_download
-from sentence_transformers import SentenceTransformer
 
-from app.utils.download_model import create_vector_db
+from app.src.nel import vector_store
 from app.config import device
 
 logger = logging.getLogger(__name__)
@@ -85,14 +82,6 @@ class ResourceDownloader:
     # Vector databases
     # ------------------------------------------------------------------
 
-    def _get_gaz_terms(self, gaz_pth: Path) -> list[str]:
-        """Read unique ``term`` values from a TSV gazetteer."""
-        gaz_df = pd.read_csv(gaz_pth, sep="\t")
-        terms = list(gaz_df["term"].unique())
-        del gaz_df
-        gc.collect()
-        return terms
-
     def build_vector_db(
         self,
         gaz_pth: Path,
@@ -100,36 +89,32 @@ class ResourceDownloader:
         vector_db_pth: Path,
     ) -> str:
         """
-        Encode gazetteer terms with the NEL sentence-transformer and write
-        the resulting tensor database to *vector_db_pth*.
+        Encode gazetteer terms with the NEL sentence-transformer and write a
+        persistent FAISS index (plus its manifest) to *vector_db_pth*.
 
         Returns the path as a ``str`` for registry persistence.
 
-        Raises ``ValueError`` if the NEL model directory does not exist yet
-        (the NEL model must be downloaded before vector DBs can be built).
-        """
-        if not nel_local_path.exists():
-            raise ValueError(
-                f"NEL model not found at {nel_local_path!r}. "
-                "Download the NEL model before building vector databases."
-            )
+        Gazetteer rows come from ``app.src.nel.gazetteer.load_gazetteer``, the
+        same function the query path uses, so index row *i* is guaranteed to
+        mean the same entry on both sides.
 
+        Raises ``VectorStoreError`` if the NEL model directory does not exist
+        yet (the NEL model must be downloaded before vector DBs can be built).
+        """
         logger.info(
             "Building vector DB: gaz=%s  nel=%s  out=%s",
             gaz_pth, nel_local_path, vector_db_pth,
         )
 
-        nel_model = SentenceTransformer(str(nel_local_path), device=device)
-        vector_db_pth.parent.mkdir(parents=True, exist_ok=True)
+        vector_store.build(
+            gaz_path=gaz_pth,
+            model_path=nel_local_path,
+            index_path=vector_db_pth,
+        )
 
-        gaz_terms = self._get_gaz_terms(gaz_pth)
-        create_vector_db(gaz_terms, nel_model, vector_db_pth)
-
-        del gaz_terms
         gc.collect()
         if device == "cuda":
             torch.cuda.empty_cache()
-        time.sleep(1)
 
         logger.info("Vector DB ready: %s", vector_db_pth)
         return str(vector_db_pth)

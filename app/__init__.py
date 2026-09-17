@@ -6,6 +6,7 @@ from flask import Flask, request, jsonify
 from app.src.pipelines import LookupPipeline, FuzzyMatchPipeline, BM25OkapiPipeline, BiencoderPipeline
 from app.src.format import PassthroughFormatter, Dt4hFormatter
 from app.model_manager import ModelManager
+from app.model_manager.resolver import LocalResolver, ModelNotFoundError
 
 app = Flask(__name__)
 app.json.sort_keys = False
@@ -22,6 +23,20 @@ method2pipeline = {
 
 _pipeline_cache: dict = {}
 _sync_lock = threading.Lock()
+
+
+def _registered_languages() -> list[str]:
+    """Language codes that have at least one NER entry in the registry.
+
+    Read fresh from disk rather than from a cached resolver: ``/sync_models``
+    can add languages while the process is running.  Used only to make a 400
+    actionable, so any failure degrades to an empty list rather than turning
+    the client's error into a server error.
+    """
+    try:
+        return sorted((LocalResolver().registry.get("ner") or {}).keys())
+    except Exception:
+        return []
 
 
 def _describe_resource(r) -> dict:
@@ -94,7 +109,19 @@ def process_bulk():
     method = 'biencoder'
     key = (method, language, frozenset(entities), negation)
     if key not in _pipeline_cache:
-        _pipeline_cache[key] = method2pipeline[method](lang=language, entities=entities, negation=negation)
+        try:
+            _pipeline_cache[key] = method2pipeline[method](lang=language, entities=entities, negation=negation)
+        except ModelNotFoundError as exc:
+            # An unregistered language or entity type is a bad request, not a
+            # server fault: the caller asked for something the registry does
+            # not describe.  A missing *file* for a registered entry is the
+            # opposite case and is left to surface as a 500.
+            return jsonify({
+                "error": str(exc),
+                "language": language,
+                "entities": entities,
+                "registered_languages": _registered_languages(),
+            }), 400
     pipeline = _pipeline_cache[key]
 
     # --- Inference + formatting ---

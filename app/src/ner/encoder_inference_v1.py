@@ -17,7 +17,7 @@ from spacy.lang.es import Spanish
 from spacy.lang.en import English
 from spacy.lang.it import Italian
 from spacy.lang.ro import Romanian
-from spacy.lang.cs import Czech      # 'cz' is non-standard; Czech ISO 639-1 is 'cs'
+from spacy.lang.cs import Czech      # Czech ISO 639-1 is 'cs'; 'cz' is the country code
 from spacy.lang.sv import Swedish    # 'se' is Northern Sami; Swedish is 'sv'
 from spacy.lang.nl import Dutch
 
@@ -29,8 +29,8 @@ SPACY_LANG_MAP: dict[str, type] = {
     'en': English,
     'it': Italian,
     'ro': Romanian,
-    'cz': Czech,   # non-standard code, mapped to Czech
-    'cs': Czech,   # standard code also supported
+    'cs': Czech,   # canonical code used throughout the registry
+    'cz': Czech,   # legacy country code, still accepted
     'se': Swedish, # ambiguous code, mapped to Swedish
     'sv': Swedish, # standard code also supported
     'nl': Dutch,
