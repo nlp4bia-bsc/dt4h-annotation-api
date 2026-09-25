@@ -308,8 +308,7 @@ Notes on specific fields:
 - **`concept_confidence`** is the **entity-linking** confidence — how sure the
   pipeline is that the mention maps to the emitted code. The CDM has one
   confidence slot per annotation, so the NER extraction score has nowhere to go
-  and is not serialised; see
-  [`docs/cdm_open_questions.md`](docs/cdm_open_questions.md).
+  and is not serialised.
 - **`negation`** is `null` when the negation model was not run, and `"yes"` /
   `"no"` only for entities that were actually assessed. An unassessed entity is
   never reported as `"no"`.
