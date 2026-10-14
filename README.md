@@ -90,6 +90,11 @@ gazetteers:
     disease: /absolute/path/to/distemist_gazetteer.tsv
     symptom: /absolute/path/to/symptemist_gazetteer.tsv
 
+crosswalks:   # shared by every language
+  icd10: /absolute/path/to/snomed_to_icd10.parquet
+  icd10pcs: /absolute/path/to/snomed_to_icd10pcs.parquet
+  icd9: /absolute/path/to/snomed_to_icd9.parquet
+
 vectorized_dbs:
   es:
     disease: null   # built by 'python -m app.model_manager'
@@ -106,6 +111,7 @@ vectorized_dbs:
   - Vector DBs: `{RESOURCES_PATH}/vectorized_dbs/{lang}/{entity}_{nel_model_name}.faiss`
     (each with a sibling `.faiss.manifest.json`)
 - **Gazetteers** must be placed manually. Each must be a TSV file with at minimum a `term` column and a `code` column. Setting a gazetteer entry to `null` is safe — the model manager and pipeline pre-flight check will skip it rather than crash. Requests for an entity with a missing or unconfigured gazetteer will fail with a clear error listing all absent resources.
+- **Crosswalks** map linked SNOMED CT codes to ICD-10 (disorders, symptoms), ICD-10-PCS (procedures) and ICD-9 (fallback for both). Each is a Parquet file with `source_code` and `target_code` columns. They are required for linking: a pipeline missing one its entity types need refuses to start. Medications need no entry — their ATC codes are read from the drug gazetteer's own `SAB`/`SAB_code` columns.
 - **Vector databases** are built from the gazetteer + NEL model by `python -m app.model_manager`, **not** on demand at request time: a pipeline whose index is missing refuses to start rather than building one mid-request. Once built, the path is written back to the registry so subsequent startups skip the build step. To force a rebuild, set the relevant entry to `null` in the registry and rerun the model manager.
 - If a model already exists locally (e.g. pre-downloaded or manually placed), set `local_path` directly and leave `repo_id: null` — no download will be attempted.
 - Swapping the NEL model produces a new vector DB filename automatically, triggering a rebuild.
@@ -288,8 +294,21 @@ produced by the pipeline are emitted as `null` rather than omitted:
         "controlled_vocabulary_version":               "2026",
         "controlled_vocabulary_concept_identifier":    "64882008",
         "controlled_vocabulary_concept_official_term": "fiebre",
-        "controlled_vocabulary_source":                "SNOMED CT",
+        "controlled_vocabulary_source":                "original",
         "...":                                         "remaining CDM annotation fields"
+      },
+      {
+        "concept_class":                               "symptom",
+        "start_offset":                                18,
+        "end_offset":                                  24,
+        "concept_mention_string":                      "fiebre",
+        "concept_confidence":                          0.9999,
+        "dt4h_concept_identifier":                     "64882008",
+        "controlled_vocabulary_namespace":             "ICD10",
+        "controlled_vocabulary_concept_identifier":    "R50.9",
+        "controlled_vocabulary_concept_official_term": null,
+        "controlled_vocabulary_source":                "original",
+        "...":                                         "every other field as in the row above"
       }
     ],
     "processing_success": true
@@ -323,18 +342,20 @@ Notes on specific fields:
   `"lexical similarity"` for `exact`, `tfidf` and `bm25`. In a fused run it is
   the method that ranked the winning code best — the same one whose score is
   reported as `concept_confidence`.
-- **`controlled_vocabulary_namespace`** is `"UMLS"` for `medication` and
-  `"SNOMED CT"` for every other concept class, matching how the gazetteers are
-  built. `controlled_vocabulary_version` and `nel_component_version` are fixed
-  values (`"2026"` and `"1.2"`).
-- **`controlled_vocabulary_source`** carries the same value as the namespace.
-  This is a project decision, not the CDM's own reading: the CDM documents the
-  field as the provenance of the term (`"original"`, `"machine translation"`,
-  `"manual translation"`), so the value is out of vocabulary and logs a warning
-  for every linked annotation. The warning is expected here, not a defect.
-- **`dt4h_concept_identifier`** repeats the gazetteer code. The CDM keeps it
-  separate so a project-local identifier can differ from the terminology's own;
-  here one gazetteer supplies both.
+- **One annotation per code.** A linked mention is reported under its
+  gazetteer code (`"SNOMED CT"`, or `"UMLS"` for `medication`) and, when a
+  crosswalk has an equivalent, once more per mapped code: `"ICD10"` for
+  disorders and symptoms, `"ICD10PCS"` for procedures, falling back to `"ICD9"`
+  when neither has a match, and `"ATC"` for medications. Parent codes listed
+  beside their children are dropped. Mapped rows repeat the mention, its
+  `concept_confidence` and negation, and have no official term.
+- **`dt4h_concept_identifier`** is the gazetteer code on *every* row of a
+  mention, so the rows of one mention can be grouped back together.
+- **`controlled_vocabulary_source`** is the provenance of the terms:
+  `"original"`, except SNOMED CT gazetteers outside Spanish and English, which
+  were `"machine translation"`. Mapped codes are always `"original"`.
+- `controlled_vocabulary_version` and `nel_component_version` are fixed values
+  (`"2026"` and `"1.2"`).
 - All of the fields above that describe a code are populated only when a NEL
   stage ran **and** that mention was linked. In `run_nerl.py` that means
   `--nel`; without it they are `null`, and an unlinked mention in a `--nel` run
@@ -439,6 +460,12 @@ each one also carries a gazetteer `code`, the canonical `term` and a
 `nel_score`, produced by the same `BiencoderPipeline` the API uses (negation
 off — that stage is available over HTTP only).
 
+Mapped codes come with it, with no extra flag: whenever a mention is linked, its
+code is also looked up in the registry's `crosswalks` (SNOMED CT → ICD-10 /
+ICD-10-PCS, falling back to ICD-9) or, for medications, in the gazetteer's own
+ATC rows, and every match is reported as an extra row. This happens for every
+retrieval method below. See "One annotation per code" in the output notes.
+
 #### Choosing the retrieval method
 
 `--nel` optionally takes the method(s) to link with. A bare `--nel` is the dense
@@ -485,7 +512,7 @@ skips that language, leaving the rest of the run intact:
 ```
 
 A run that does not use `dense` is never gated on the encoder or the vector DB;
-only the gazetteers have to be in place.
+only the gazetteers and the crosswalks have to be in place.
 
 Editing a gazetteer after its index was built invalidates the index; that
 surfaces at load time and is fixed by rerunning `python -m app.model_manager`.
@@ -563,8 +590,10 @@ results/
     └── es.tsv                # every annotation, sorted by filename then offset
 ```
 
-Under `--nel` the flat files gain the linking columns — `code`, `term` on the
-`.ann` rows, and `code`, `term`, `nel_score` on the `.tsv`. They are absent
+Under `--nel` the flat files gain the linking columns — `code`, `term`,
+`namespace` on the `.ann` rows, and `code`, `term`, `nel_score`, `namespace` on
+the `.tsv` — and a mention gets one row per code it is reported under, as in
+the CDM JSON. They are absent
 rather than blank without the flag, so an empty code is never mistaken for an
 unlinked mention when the linking stage simply never ran. The CDM JSON has the
 fields either way, `null` when NER ran alone. Which method produced a code is
@@ -617,6 +646,10 @@ POST /process_bulk?language=es&entities=disease,symptom&negation=false
  NEL  — biencoder (SentenceTransformer query embedding)
   │        → cosine similarity over pre-built vector DB
   │        → adds {code, term, nel_score} to each annotation
+  │
+  ▼
+ Crosswalks — SNOMED CT → ICD-10 / ICD-10-PCS / ICD-9, UMLS → ATC
+  │        → adds codes: [gazetteer code, mapped codes...] to each linked annotation
   │
   ▼
  Negation (optional, negation=true only)

@@ -16,6 +16,7 @@ dependencies = [
     # requires the sentencepiece *and* protobuf backends, and reports them one
     # at a time — clearing the first just surfaces the second.
     "protobuf>=4.25",
+    "pyarrow>=25.0.1",
     "pydantic>=2.0",
     "pyyaml>=6.0",
     "rank-bm25>=0.2.2",

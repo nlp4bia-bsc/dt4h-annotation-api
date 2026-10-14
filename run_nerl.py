@@ -8,7 +8,10 @@ Two modes, selected by ``--nel``:
   * **NER + NEL** (``--nel``) — the same ``BiencoderPipeline`` the Flask
     ``/process_bulk`` endpoint uses, minus negation: NER, then retrieval
     against the gazetteer, so every annotation carries a normalised ``code``,
-    its canonical ``term`` and a ``nel_score``.
+    its canonical ``term`` and a ``nel_score``.  Codes with an equivalent in a
+    second terminology (SNOMED CT → ICD-10 / ICD-10-PCS, falling back to ICD-9;
+    UMLS → ATC) are reported under both: one extra row per mapped code in every
+    output, sharing the mention's span and score.
 
 ``--nel`` optionally takes the retrieval methods to use, so a bare ``--nel``
 keeps meaning what it always did:
@@ -30,6 +33,7 @@ What ``--nel`` needs on disk depends on the methods chosen.  Every method needs
 a gazetteer per entity type; ``dense`` additionally needs the NEL encoder and a
 built vector DB per entity type (``uv run python -m app.model_manager``), while
 ``tfidf`` and ``bm25`` share one sparse index that is built lazily on first use.
+Every method also needs the ``crosswalks`` its entity types map through.
 Missing resources abort *that language* with a message naming each one; the run
 continues with the next.
 
@@ -183,6 +187,7 @@ def _check_nel_registry(
     built on first use, from the gazetteer that is verified here anyway.
     """
     from app.model_manager.resolver import ModelNotFoundError
+    from app.src.nel.crosswalk import registry_crosswalks
 
     problems: list[str] = []
     needs_dense = "dense" in methods
@@ -217,6 +222,13 @@ def _check_nel_registry(
                 )
         except (ModelNotFoundError, FileNotFoundError) as exc:
             problems.append(f"'{entity}' vector DB unavailable: {exc}")
+
+    # Crosswalks are shared across entity types, so each is checked once.
+    for name in sorted({name for entity in entity_types for name in registry_crosswalks(entity)}):
+        try:
+            resolver.get_crosswalk_path(name)
+        except (ModelNotFoundError, FileNotFoundError) as exc:
+            problems.append(f"'{name}' crosswalk unavailable: {exc}")
 
     for problem in problems:
         log.warning("[%s] %s", lang, problem)
@@ -300,27 +312,45 @@ def _load_document(json_path: Path, lang: str) -> tuple[str, dict] | None:
     return text, metadata.model_dump()
 
 
+def _linking_columns(ann: dict) -> list[tuple]:
+    """``(code, term, namespace)`` for each code a mention is reported under.
+
+    Mirrors the CDM JSON: one row per code, gazetteer code first, and a single
+    row of blanks for a mention that was never linked.
+    """
+    # Deferred like every other app import here: importing the package runs
+    # app/__init__.py, which loads Flask and the whole pipeline.
+    from app.src.format.dt4h import concept_codes
+
+    return [
+        (entry["code"], entry.get("term"), entry.get("namespace"))
+        for entry in concept_codes(ann)
+    ] or [(None, None, None)]
+
+
 def _write_tsv(path: Path, rows: list[tuple[str, dict]], with_nel: bool = False) -> None:
     """Write the per-language annotation table.
 
-    Under ``--nel`` three linking columns are appended.  They are not merely
-    left blank in NER-only mode: a column that is always empty invites the
-    reader to treat a missing code as an unlinked mention rather than as a
-    stage that never ran.
+    Under ``--nel`` four linking columns are appended, and a mention gets one
+    row per code it is reported under.  They are not merely left blank in
+    NER-only mode: a column that is always empty invites the reader to treat a
+    missing code as an unlinked mention rather than as a stage that never ran.
     """
     path.parent.mkdir(parents=True, exist_ok=True)
     sorted_rows = sorted(rows, key=lambda r: (r[0], r[1]["start"]))
     header = ["filename", "label", "start", "end", "span", "ner_score"]
     if with_nel:
-        header += ["code", "term", "nel_score"]
+        header += ["code", "term", "nel_score", "namespace"]
     with open(path, "w", newline="", encoding="utf-8") as fh:
         writer = csv.writer(fh, delimiter="\t")
         writer.writerow(header)
         for filename, ann in sorted_rows:
             row = [filename, ann["ner_class"], ann["start"], ann["end"], ann["span"], ann["ner_score"]]
-            if with_nel:
-                row += [ann.get("code"), ann.get("term"), ann.get("nel_score")]
-            writer.writerow(row)
+            if not with_nel:
+                writer.writerow(row)
+                continue
+            for code, term, namespace in _linking_columns(ann):
+                writer.writerow(row + [code, term, ann.get("nel_score"), namespace])
 
 
 def _write_ann(path: Path, annotations: list[dict], with_nel: bool = False) -> None:
@@ -329,16 +359,12 @@ def _write_ann(path: Path, annotations: list[dict], with_nel: bool = False) -> N
         writer = csv.writer(fh, delimiter="\t")
 
         for ann in annotations:
-            # Just pass the values as a list in the order you want them
-            row = [
-                ann["ner_class"],
-                ann["start"],
-                ann["end"],
-                ann["span"],
-            ]
-            if with_nel:
-                row += [ann.get("code"), ann.get("term")]
-            writer.writerow(row)
+            row = [ann["ner_class"], ann["start"], ann["end"], ann["span"]]
+            if not with_nel:
+                writer.writerow(row)
+                continue
+            for code, term, namespace in _linking_columns(ann):
+                writer.writerow(row + [code, term, namespace])
 
 
 def _write_json(path: Path, text: str, annotations: list[dict], footer: dict, formatter) -> None:

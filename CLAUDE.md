@@ -89,6 +89,9 @@ POST /process_bulk?language=es&entities=disease,symptom&negation=false
      │       └─ CrossEncoderReranker over the shortlist — OFF by default and
      │           unconfigured; when it runs it owns both the final order and
      │           the reported score
+     ├─ Crosswalks: attach_concept_codes adds `codes` — the gazetteer code
+     │       plus its ICD / ATC equivalents (see "Crosswalks"). Always on,
+     │       no flag; the formatter emits one CDM annotation per code
      └─ Negation (optional): dedicated NER model → overlap detection adds
              is_negated / is_uncertain
   → join_all_entities() — merge contiguous same-class spans, sort by offset
@@ -123,8 +126,9 @@ The language directory name is authoritative — it selects the models.
 Outputs per language: `results/{lang}/raw/{stem}.ann`,
 `results/{lang}/formatted/{stem}.json`, `results/{lang}/{lang}.tsv`.
 
-`--nel` appends `code` / `term` to the `.ann` rows and `code` / `term` /
-`nel_score` to the TSV; the columns are absent without it rather than empty, so
+`--nel` appends `code` / `term` / `namespace` to the `.ann` rows and `code` /
+`term` / `nel_score` / `namespace` to the TSV, one row per code a mention is
+reported under (see "Crosswalks"); the columns are absent without it rather than empty, so
 a blank code never has to be read as "unlinked" when the stage never ran. The
 CDM JSON needs no switch — `Dt4hFormatter` fills the linking fields when they
 are present and emits nulls when they are not. Which methods produced a code is
@@ -134,7 +138,8 @@ Missing NEL resources abort that one language (message names each missing item)
 and the run continues; a language whose documents were all rejected never loads
 the index at all. What counts as missing depends on the methods asked for:
 only `dense` needs the NEL encoder and a built vector DB, so a lexical-only run
-is gated on the gazetteers alone (`_check_nel_registry`).
+is gated on the gazetteers and crosswalks alone (`_check_nel_registry`).
+The crosswalk step itself has no flag: it runs under every `--nel` method.
 
 ## Key files
 
@@ -148,6 +153,7 @@ is gated on the gazetteers alone (`_check_nel_registry`).
 | `app/src/nel/gazetteer.py` | `load_gazetteer` — the only way either side derives index row order |
 | `app/src/nel/candidates.py` | `DenseGenerator`, `ExactMatchGenerator`, `TfidfCharNgramGenerator`, `BM25Generator` and the generator Protocol |
 | `app/src/nel/lexical_index.py` | Persisted sparse index shared by the TF-IDF and BM25 generators |
+| `app/src/nel/crosswalk.py` | `Crosswalk`, `Terminology` — SNOMED→ICD / UMLS→ATC codes, namespace and term source per entity type |
 | `app/src/nel/fusion.py` | `reciprocal_rank_fusion` |
 | `app/src/nel/rerank.py` | `CrossEncoderReranker` — inference only, no training |
 | `tests/conftest.py` | `StubEncoder` and the gazetteer / FAISS-index fixtures |
@@ -182,27 +188,57 @@ NER-only runs (`run_nerl.py` without `--nel`) emit `concept_confidence: null`.
 `negation` is `null` when the negation model was not run, and only `"yes"`/`"no"`
 when an entity was actually assessed. Do not default it to `"no"`.
 
-Six linking fields are written by `_rename_annotation` only when the annotation
-carries a `code`, since each describes a link that may not exist:
+**One CDM annotation per code.** A linked mention is emitted once per entry in
+its `codes` list (`Dt4hFormatter._annotation_rows`): the gazetteer code first,
+then any crosswalk targets. The rows share span, class, confidence, negation and
+NEL component, and differ only in the `controlled_vocabulary_*` fields. The
+annotation count therefore exceeds the mention count — agreed with downstream.
+
+Linking fields are written only for a linked mention, since each describes a
+link that may not exist:
 
 | Field | Value |
 |---|---|
-| `dt4h_concept_identifier` | the gazetteer code, same as `controlled_vocabulary_concept_identifier` |
+| `dt4h_concept_identifier` | the gazetteer code, on every row of the mention — the grouping key |
 | `nel_component_type` | from `nel_method` via `NEL_COMPONENT_TYPE_MAP`; `null` when no method was recorded |
 | `nel_component_version` | constant `NEL_COMPONENT_VERSION` = `"1.2"` |
-| `controlled_vocabulary_namespace` | `UMLS` for `medication`, else `SNOMED CT` — keyed on the *mapped* `concept_class` |
+| `controlled_vocabulary_concept_identifier` | this row's code |
+| `controlled_vocabulary_concept_official_term` | gazetteer term; `null` on mapped rows |
+| `controlled_vocabulary_namespace` | this row's terminology, from `codes[i].namespace` |
 | `controlled_vocabulary_version` | constant `CONTROLLED_VOCABULARY_VERSION` = `"2026"` |
-| `controlled_vocabulary_source` | mirrors the namespace |
+| `controlled_vocabulary_source` | `original`; `machine translation` for SNOMED CT outside es/en |
 
-`controlled_vocabulary_source` is deliberately out of vocabulary: the CDM
-defines it as `original`/`machine translation`/`manual translation`, so every
-linked annotation logs a warning. That is the agreed value, not a bug — do not
-"fix" it by silencing the validator.
+Namespace and source are decided in the pipeline (`crosswalk.Terminology`), not
+guessed by the formatter. A pipeline that links without the crosswalk step
+(`LookupPipeline` & co.) gets `null` for both rather than a guess.
 
 `nel_method` reaches the formatter from `biencoder_inference`, which reads
 `MatchCandidate.effective_method` — the winning generator, resolved through
 `metadata["source_method"]` when the candidate came out of RRF, since the bare
 `method` on a fused candidate is `"rrf"`.
+
+## Crosswalks
+
+`app/src/nel/crosswalk.py` reports a linked code under a second terminology.
+`ENTITY_TERMINOLOGIES` holds the chain per entity type; the first crosswalk with
+a target wins:
+
+| Entity | Gazetteer | Crosswalk chain |
+|---|---|---|
+| `disease`, `symptom` | SNOMED CT | ICD10 → ICD9 |
+| `procedure` | SNOMED CT | ICD10PCS → ICD9 |
+| `drug` | UMLS | ATC, read from the gazetteer's own `SAB=ATC` / `SAB_code` rows |
+
+The SNOMED crosswalks are Parquet files with `source_code` and `target_code`
+columns, registered under the top-level `crosswalks:` key
+(`icd10`, `icd10pcs`, `icd9`) and shared by every language. They are required:
+`BiencoderPipeline` and `run_nerl.py --nel` refuse to start without the ones
+their entity types need. Targets are reduced to the most specific codes —
+a code that is a prefix of another (`G80` beside `G80.1`) is dropped.
+
+Mappings never rescore: a mapped row carries the link's `concept_confidence`.
+`BiencoderPipeline.predict` runs `attach_concept_codes` between linking and
+`join_all_entities`, adding `codes` to every linked annotation.
 
 ## Registry and resource layout
 
@@ -254,6 +290,9 @@ input directories and `report_language`. An unregistered language on
 4. Add `vectorized_dbs.<lang>.<entity>: null`.
 5. Run `uv run python -m app.model_manager` to build the vector DB — nothing
    builds it lazily, and `BiencoderPipeline` refuses to start without it.
+   Crosswalks are shared across languages and need no per-language entry; a
+   new *entity type* needs a row in `crosswalk.ENTITY_TERMINOLOGIES`, or it is
+   reported as SNOMED CT with no mapped codes.
 6. Optionally run `uv run test_init.py` to check the pipeline end to end.
 
 ## Cross-encoder reranking
@@ -287,7 +326,7 @@ language has a `negation` entry, but most have `repo_id: null`.
 
 ## Tests
 
-`uv run pytest` — 164 tests, ~1.5s, fully offline. No `registry.yaml`, no
+`uv run pytest` — 191 tests, ~1.5s, fully offline. No `registry.yaml`, no
 `app/resources/`, no model download, no network.
 
 The NEL encoder is replaced by `tests/conftest.py:StubEncoder`, which embeds
@@ -302,8 +341,8 @@ Everything else is the real code path: real FAISS indexes, real gazetteer
 loading, real sklearn vectorizers, real CDM serialisation. All artifacts go to
 pytest's `tmp_path`; the suite writes nothing into the repo.
 
-An autouse fixture clears the module-level caches in `vector_store` and
-`lexical_index` around every test. Without it a test can pass only because an
+An autouse fixture clears the module-level caches in `vector_store`,
+`lexical_index` and `crosswalk` around every test. Without it a test can pass only because an
 earlier one warmed a cache.
 
 Keep the suite offline. A test needing a real checkpoint belongs behind an

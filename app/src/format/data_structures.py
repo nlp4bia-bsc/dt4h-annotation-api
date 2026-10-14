@@ -52,7 +52,7 @@ CONCEPT_CLASSES = (
 NER_COMPONENT_TYPES = ("dictionary lookup", "transformer", "other")
 NEL_COMPONENT_TYPES = ("lexical similarity", "transformer", "other")
 CONTROLLED_VOCAB_NAMESPACES = (
-    "UMLS", "SNOMED CT", "ICD10", "MedDRA", "ICD9", "DT4H", "HPO", "LOINC",
+    "UMLS", "SNOMED CT", "ICD10", "ICD10PCS", "MedDRA", "ICD9", "DT4H", "HPO", "LOINC",
     "ISO", "GeoNames", "MeSH", "ESCO", "ATC", "ICPC", "other", "none",
 )
 CONTROLLED_VOCAB_SOURCES = ("original", "machine translation", "manual translation")
@@ -158,11 +158,14 @@ class RecordMetadata(BaseModel):
 
 
 class Annotation(BaseModel):
-    """A single detected entity, in CDM field names.
+    """One detected entity under one code, in CDM field names.
 
-    ``concept_confidence`` carries the *NER* extraction confidence.  The CDM has
-    a single confidence slot per annotation, so when a NEL stage is added its
-    score has nowhere of its own to go — see ``docs/cdm_open_questions.md``.
+    A mention linked to several codes (SNOMED CT plus its ICD mapping, say) is
+    several annotations sharing a span and a ``dt4h_concept_identifier``.
+
+    ``concept_confidence`` carries the *NEL* linking confidence.  The CDM has a
+    single confidence slot per annotation, so the NER score has nowhere of its
+    own to go — see ``docs/cdm_open_questions.md``.
     """
 
     concept_class:                              ConceptClass = None

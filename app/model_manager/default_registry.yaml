@@ -241,6 +241,10 @@ gazetteers:
     symptom: <path_to_gazetteer>
     procedure: <path_to_gazetteer>
     drug: <path_to_gazetteer>
+crosswalks:
+  icd10: <path_to_snomed_to_icd10.parquet>
+  icd10pcs: <path_to_snomed_to_icd10pcs.parquet>
+  icd9: <path_to_snomed_to_icd9.parquet>
 vectorized_dbs:
   cs:
     disease: null

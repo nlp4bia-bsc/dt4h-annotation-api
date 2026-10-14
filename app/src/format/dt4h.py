@@ -22,13 +22,18 @@ The table below shows how raw pipeline fields map to CDM fields:
 +----------------------+---------------------------------------------------+----------------------------------+
 | ``nel_score``        | ``concept_confidence``                            | see "Confidence" below           |
 +----------------------+---------------------------------------------------+----------------------------------+
-| ``code``             | ``controlled_vocabulary_concept_identifier``      | absent for NER-only pipelines    |
+| ``codes[i].code``    | ``controlled_vocabulary_concept_identifier``      | one annotation per code, see     |
+|                      |                                                   | "One annotation per code"        |
 +----------------------+---------------------------------------------------+----------------------------------+
-| ``code``             | ``dt4h_concept_identifier``                       | same value, see "Linking fields" |
+| ``codes[i].term``    | ``controlled_vocabulary_concept_official_term``   | null on mapped codes             |
++----------------------+---------------------------------------------------+----------------------------------+
+| ``codes[i].namespace`` | ``controlled_vocabulary_namespace``             |                                  |
++----------------------+---------------------------------------------------+----------------------------------+
+| ``codes[i].source``  | ``controlled_vocabulary_source``                  |                                  |
++----------------------+---------------------------------------------------+----------------------------------+
+| ``code``             | ``dt4h_concept_identifier``                       | the gazetteer code, on every row |
 +----------------------+---------------------------------------------------+----------------------------------+
 | ``nel_method``       | ``nel_component_type``                            | mapped, see "Linking fields"     |
-+----------------------+---------------------------------------------------+----------------------------------+
-| ``term``             | ``controlled_vocabulary_concept_official_term``   | absent for NER-only pipelines    |
 +----------------------+---------------------------------------------------+----------------------------------+
 | ``is_negated``       | ``negation``                                      | bool → ``"yes"`` / ``"no"``      |
 +----------------------+---------------------------------------------------+----------------------------------+
@@ -63,16 +68,26 @@ NER-only pipelines (``run_nerl.py``) produce no ``nel_score``, so they emit
 made, and the field must not be back-filled with an extraction score, which
 measures something else entirely.
 
+One annotation per code
+-----------------------
+A linked mention is reported under every code it has, one CDM annotation each.
+The first is always the gazetteer's own code (SNOMED CT, or a UMLS CUI for
+medications); any codes ``app/src/nel/crosswalk.py`` mapped it to (ICD-10,
+ICD-10-PCS, ICD-9, ATC) follow.  The rows share everything that describes the
+mention — span, ``concept_class``, ``concept_confidence``, negation, NEL
+component — and differ only in the ``controlled_vocabulary_*`` fields.
+
+The pipeline lists those codes as ``codes``.  A pipeline that links without
+the crosswalk step leaves only ``code``/``term``; ``concept_codes`` reports
+that bare code, with no namespace, rather than guessing one.
+
 Linking fields
 --------------
-Six further CDM fields are written whenever an annotation carries a ``code``,
-and left ``null`` when it does not — they describe a link, so an unlinked
-mention must not carry them:
+These are written only for a linked mention — they describe a link, so an
+unlinked one leaves them ``null``:
 
-* ``dt4h_concept_identifier`` — the gazetteer code, the same value as
-  ``controlled_vocabulary_concept_identifier``.  The CDM keeps the two apart so
-  a project-local identifier can differ from the terminology's own; here the
-  gazetteer supplies both.
+* ``dt4h_concept_identifier`` — the gazetteer code, on the gazetteer row *and*
+  on every mapped row, so consumers can group the rows of one mention.
 * ``nel_component_type`` — derived from ``nel_method``, which names the
   retriever that actually produced the winning code.  Since the retrieval
   methods became selectable per run, a code no longer implies the bi-encoder
@@ -80,21 +95,12 @@ mention must not carry them:
   ``lexical similarity``.  An annotation with no recorded method leaves the
   field ``null`` rather than claiming ``other``.
 * ``nel_component_version`` — the constant ``NEL_COMPONENT_VERSION``.
-* ``controlled_vocabulary_namespace`` — ``UMLS`` for ``medication``,
-  ``SNOMED CT`` for every other concept class, keyed on the *mapped* class so
-  the registry's ``drug`` and the checkpoints' ``medicamento`` resolve alike.
+* ``controlled_vocabulary_namespace`` — the terminology of this row's code.
 * ``controlled_vocabulary_version`` — the constant
   ``CONTROLLED_VOCABULARY_VERSION``.
-* ``controlled_vocabulary_source`` — set to the same value as the namespace.
-
-  .. warning::
-     The CDM documents this field as the *provenance of the term*
-     (``original`` | ``machine translation`` | ``manual translation``), not the
-     terminology it came from — that is what the namespace field is for.  A
-     namespace value here is out of vocabulary, so ``ControlledVocabSource``
-     logs a warning for **every linked annotation**.  This is a deliberate
-     project decision; change ``controlled_vocabulary_source`` in
-     ``_rename_annotation`` to ``"original"`` to follow the CDM instead.
+* ``controlled_vocabulary_source`` — how the gazetteer's terms were obtained:
+  ``original``, or ``machine translation`` for SNOMED CT outside es/en.
+  Mapped codes are always ``original``.
 
 Not assessed vs. assessed-negative
 ----------------------------------
@@ -192,24 +198,23 @@ NEL_COMPONENT_TYPE_MAP: dict[str, str] = {
 #: Version of the linking component, reported for every linked annotation.
 NEL_COMPONENT_VERSION = "1.2"
 
-#: Terminology the gazetteer codes belong to.  The drug gazetteer is UMLS;
-#: every other entity type is SNOMED CT.  Keyed by CDM ``concept_class``, which
-#: is where ``_to_concept_class`` has already resolved the registry's ``drug``
-#: and the checkpoints' ``medicamento`` to the single value ``medication``.
-VOCABULARY_NAMESPACE_BY_CONCEPT_CLASS: dict[str, str] = {
-    "medication": "UMLS",
-}
-DEFAULT_VOCABULARY_NAMESPACE = "SNOMED CT"
-
-#: Edition/release of the terminologies above.
+#: Edition/release of every terminology a code is reported under.
 CONTROLLED_VOCABULARY_VERSION = "2026"
 
 
-def _vocabulary_namespace(concept_class) -> str:
-    """The terminology a code of this concept class comes from."""
-    return VOCABULARY_NAMESPACE_BY_CONCEPT_CLASS.get(
-        concept_class, DEFAULT_VOCABULARY_NAMESPACE
-    )
+def concept_codes(ann: dict) -> list[dict]:
+    """Every code an annotation is reported under, gazetteer code first.
+
+    Each entry has ``code`` and ``term``, and ``namespace``/``source`` when the
+    pipeline's crosswalk step set ``codes``.  A pipeline that links without
+    that step still has its bare ``code`` reported, with no namespace rather
+    than a guessed one.  An unlinked annotation has none.
+    """
+    if "codes" in ann:
+        return ann["codes"]
+    if ann.get("code") is not None:
+        return [{"code": ann["code"], "term": ann.get("term")}]
+    return []
 
 
 def _normalise_label(label: str) -> str:
@@ -313,14 +318,15 @@ class Dt4hFormatter(DataFormatter):
         -------
         list[dict]
             Annotation dicts with CDM v2 field names, ready to be passed to
-            ``Annotation(**ann)``.
+            ``Annotation(**ann)``.  A mention linked to several codes yields
+            one dict per code, so this can be longer than ``annotations``.
 
         Raises
         ------
         ValueError
             If a required field is missing from any annotation dict.
         """
-        return [self._rename_annotation(ann) for ann in annotations]
+        return [row for ann in annotations for row in self._annotation_rows(ann)]
 
     def _build_metadata(self, text: str, footer: dict) -> dict:
         """Extract recognised ``RecordMetadata`` fields from the footer.
@@ -353,9 +359,37 @@ class Dt4hFormatter(DataFormatter):
     # Private helpers
     # ------------------------------------------------------------------
 
+    @classmethod
+    def _annotation_rows(cls, ann: dict) -> list[dict]:
+        """One CDM annotation per code the mention is reported under.
+
+        An unlinked mention still yields one row, with its linking fields null.
+        """
+        mention = cls._rename_annotation(ann)
+        codes = concept_codes(ann)
+        if not codes:
+            return [mention]
+
+        gazetteer_code = codes[0]["code"]
+        return [
+            {
+                **mention,
+                "dt4h_concept_identifier":                     gazetteer_code,
+                "controlled_vocabulary_concept_identifier":    entry["code"],
+                "controlled_vocabulary_concept_official_term": entry.get("term"),
+                "controlled_vocabulary_namespace":             entry.get("namespace"),
+                "controlled_vocabulary_source":                entry.get("source"),
+                "controlled_vocabulary_version":               CONTROLLED_VOCABULARY_VERSION,
+            }
+            for entry in codes
+        ]
+
     @staticmethod
     def _rename_annotation(ann: dict) -> dict:
-        """Convert a single raw annotation dict to CDM field names.
+        """Convert the mention-level fields of a raw annotation to CDM names.
+
+        Everything here is shared by all the rows of one mention; the per-code
+        ``controlled_vocabulary_*`` fields are added by ``_annotation_rows``.
 
         Only the four span fields are required.  Linking and negation fields are
         optional so that NER-only pipelines (see ``run_nerl.py``) serialise
@@ -389,20 +423,12 @@ class Dt4hFormatter(DataFormatter):
         # --- Linking (absent for NER-only pipelines) ---
         # concept_confidence is the *linking* confidence; a run with no NEL
         # stage emits null rather than falling back to the extraction score.
-        code = ann.get("code")
+        # Mapped codes share it: a crosswalk adds no uncertainty of its own.
         renamed["concept_confidence"] = ann.get("nel_score")
-        renamed["controlled_vocabulary_concept_identifier"] = code
-        renamed["controlled_vocabulary_concept_official_term"] = ann.get("term")
 
-        # The remaining linking fields describe a code, so they are written only
-        # when there is one. Emitting a namespace and a vocabulary version for
-        # an unlinked mention would describe a lookup that never happened.
-        if code is not None:
-            renamed["dt4h_concept_identifier"] = code
-            namespace = _vocabulary_namespace(renamed["concept_class"])
-            renamed["controlled_vocabulary_namespace"] = namespace
-            renamed["controlled_vocabulary_version"] = CONTROLLED_VOCABULARY_VERSION
-            renamed["controlled_vocabulary_source"] = namespace
+        # The NEL component describes a link, so it is written only when there
+        # is one — not for a lookup that never happened.
+        if ann.get("code") is not None:
             renamed["nel_component_version"] = NEL_COMPONENT_VERSION
 
             # Left null when the pipeline recorded no method: 'other' would

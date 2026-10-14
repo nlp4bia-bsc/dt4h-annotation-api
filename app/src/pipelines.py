@@ -4,6 +4,7 @@ from abc import abstractmethod
 from app.model_manager.resolver import LocalResolver
 from app.src.ner import encoder_inference
 from app.src.nel import lookup_inference, fuzzymatch_inference, bm25okapi_inference, biencoder_inference
+from app.src.nel.crosswalk import attach_concept_codes, build_terminology, registry_crosswalks
 from app.src.nel.linker import EntityLinker
 from app.src.negation.negation_utils import add_negation_uncertainty_attributes
 from app.utils.results_postprocessing import join_all_entities
@@ -17,6 +18,7 @@ def _check_resources(
     need_ner: bool = False,
     need_nel: bool = False,
     need_vdb: bool = False,
+    need_crosswalks: bool = False,
     negation: bool = False,
 ) -> None:
     """Validate all pipeline resources up-front; raise RuntimeError listing every missing item."""
@@ -54,6 +56,13 @@ def _check_resources(
                     )
             except Exception as exc:
                 missing.append(f"Vector DB {lang}/{e}: {exc}")
+
+    if need_crosswalks:
+        for name in sorted({name for e in entities for name in registry_crosswalks(e)}):
+            try:
+                resolver.get_crosswalk_path(name)
+            except Exception as exc:
+                missing.append(f"Crosswalk {name}: {exc}")
 
     if missing:
         raise RuntimeError(
@@ -275,7 +284,8 @@ class BiencoderPipeline(AnnotationPipeline):
         self.resolver = LocalResolver()
         _check_resources(
             self.resolver, lang, entities,
-            need_ner=True, need_nel=dense, need_vdb=dense, negation=negation,
+            need_ner=True, need_nel=dense, need_vdb=dense, need_crosswalks=True,
+            negation=negation,
         )
         self.ner_paths = [self.resolver.get_ner_path(self.lang, e)[0] for e in (entities + ["negation"] if self.negation else entities)]
         self.gaz_paths = [self.resolver.get_gaz_path(self.lang, e) for e in entities]
@@ -311,20 +321,24 @@ class BiencoderPipeline(AnnotationPipeline):
             for entity, gaz_path, vdb_path in zip(entities, self.gaz_paths, self.vdb_paths)
         ]
 
+        # What each entity type's codes are, and the crosswalks that report them
+        # under a second terminology (ICD, ATC). Aligned with self.linkers.
+        self.terminologies = [build_terminology(self.resolver, self.lang, e) for e in entities]
+
     def predict(self, texts: list[str]) -> list[list[dict]]:
         # use v2 encoder
         ner_results = encoder_inference(
             texts, self.ner_paths, version=self.ner_version
         )
 
-        # If no negation, run the standard pipeline and exit
-        if not self.negation:
-            norm_results = biencoder_inference(ner_results, self.linkers)
-            return join_all_entities(norm_results)
+        # The negation model's output rides last in ner_results; it is not an
+        # entity type and must not reach the linkers.
+        neg_results = ner_results.pop() if self.negation else None
 
-        # If negation exists, handle the specialized pipeline
-        neg_results = ner_results.pop()
         norm_results = biencoder_inference(ner_results, self.linkers)
+        norm_results = attach_concept_codes(norm_results, self.terminologies)
         norm_results = join_all_entities(norm_results)
 
+        if neg_results is None:
+            return norm_results
         return add_negation_uncertainty_attributes(norm_results, neg_results)

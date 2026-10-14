@@ -230,6 +230,28 @@ class LocalResolver:
             )
         return pth
 
+    def get_crosswalk_path(self, name: str) -> Path:
+        """
+        Returns the validated path to a code-mapping Parquet file, e.g. ``icd10``.
+
+        Crosswalks map gazetteer codes into a second terminology and are shared
+        by every language. Semantics otherwise mirror ``get_gaz_path``.
+        """
+        raw = (self.registry.get("crosswalks") or {}).get(name)
+        if raw is None:
+            raise ModelNotFoundError(
+                f"Crosswalk {name!r} is not configured — add a path to its Parquet "
+                f"file under crosswalks › {name} in the registry."
+            )
+
+        pth = _make_abs(raw)
+        if not pth.exists():
+            raise FileNotFoundError(
+                f"Crosswalk {name!r} not found at {pth!r} "
+                "(path is registered but the file is missing)."
+            )
+        return pth
+
     def _get_nel_model_name(self, lang: str) -> str:
         """Derive the NEL model directory name for path construction.
 
