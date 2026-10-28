@@ -7,6 +7,8 @@ from app.src.pipelines import LookupPipeline, FuzzyMatchPipeline, BM25OkapiPipel
 from app.src.format import PassthroughFormatter, Dt4hFormatter
 from app.model_manager import ModelManager
 from app.model_manager.resolver import LocalResolver, ModelNotFoundError
+from app.src import ner
+from app.src.nel import lexical_index, rerank, vector_store
 
 app = Flask(__name__)
 app.json.sort_keys = False
@@ -185,6 +187,14 @@ def sync_models():
         cache_cleared = False
         if not errors:
             _pipeline_cache.clear()
+            # The pipelines are only handles: the models and indexes they hold
+            # live in these per-path caches, and a re-download or rebuild
+            # writes to the same path, so they must go too or the next
+            # pipeline is built from the stale copies.
+            ner.clear_cache()
+            vector_store.clear_cache()
+            lexical_index.clear_cache()
+            rerank.clear_cache()
             cache_cleared = True
 
         return jsonify({

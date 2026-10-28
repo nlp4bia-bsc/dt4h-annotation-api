@@ -44,7 +44,9 @@ where each ``entity_k`` is a dict with **at least** the following keys:
 
 Behaviour constraints
 ~~~~~~~~~~~~~~~~~~~~~
-* The function must be **stateless**: no global or shared mutable state.
+* The function must be **stateless** with respect to its inputs: no state
+  carried from one call's texts to the next. Caching loaded checkpoints is
+  allowed (v2 does, see ``clear_cache``), since it changes cost, not output.
 * If ``texts`` is empty the function must return ``[]`` without raising.
 * If a model path in ``ner_models`` does not exist, the function must raise
   ``FileNotFoundError`` with a descriptive message before any GPU memory is
@@ -58,6 +60,9 @@ from typing import Optional
 
 from .encoder_inference_v1 import ner_inference_v1
 from .encoder_inference_v2 import ner_inference_v2
+# Re-exported: callers that load models for one language and then move on
+# (run_nerl.py, /sync_models) release them through here.
+from .encoder_inference_v2 import clear_cache as clear_cache
 
 
 def encoder_inference(

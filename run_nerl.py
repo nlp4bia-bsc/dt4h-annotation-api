@@ -66,21 +66,42 @@ A document is **rejected** (logged, skipped, counted; the run continues) when:
 
 For each language directory found in data/:
   1. Checks the registry: all NER models must have a local_path (i.e. downloaded).
-  2. Loads all .json files from data/{lang}/, resolving text as described above.
-  3. Runs inference across all registered entity types (disease, symptom, etc.) —
-     NER alone, or NER + NEL under ``--nel``.
+  2. Streams the .json files of data/{lang}/ in filename order, ``--batch-size``
+     usable documents at a time, resolving text as described above.
+  3. Runs inference on each batch across all registered entity types (disease,
+     symptom, etc.) — NER alone, or NER + NEL under ``--nel``.
   4. Writes results/{lang}/raw/{stem}.ann   — flat entity spans per document.
   5. Writes results/{lang}/formatted/{stem}.json — DT4H CDM JSON per document.
-  6. Writes results/{lang}/{lang}.tsv — all annotations across all files, sorted by filename then start span.
+  6. Appends to results/{lang}/{lang}.tsv — all annotations across all files,
+     sorted by filename then start span.
   7. Releases model memory before processing the next language.
+
+Memory
+------
+Only one batch is ever held: its texts, its annotations and the NEL encodings
+of its mentions.  Peak memory depends on ``--batch-size``, not on how many
+documents a language has.  The models do stay resident for the whole language
+— every NER model at once, plus the NEL encoder and indexes under ``--nel`` —
+and are dropped before the next language starts.
+
+Resuming
+--------
+A document is finished once its ``formatted/{stem}.json`` exists: it is written
+last, atomically, after the document's TSV rows are flushed.  ``--resume`` skips
+finished documents and drops any TSV rows belonging to unfinished ones, so a run
+killed partway through continues where it stopped.  It trusts that the earlier
+run used the same entity types and NEL methods; only the TSV columns are checked.
 """
 
 import argparse
 import csv
 import gc
+import itertools
 import json
 import logging
+import os
 import sys
+from collections.abc import Iterable, Iterator
 from pathlib import Path
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s  %(levelname)-8s  %(message)s", datefmt="%H:%M:%S")
@@ -101,6 +122,11 @@ NEL_METHOD_FLAGS: dict[str, str] = {
 # What a bare ``--nel`` means. Kept as the default because it is what every
 # existing invocation already gets.
 DEFAULT_NEL_METHODS: tuple[str, ...] = ("dense",)
+
+# Documents per inference batch. Large enough that NEL deduplicates repeated
+# mentions across many documents, small enough that a batch's annotations
+# stay in the megabytes.
+DEFAULT_BATCH_SIZE = 256
 
 
 def _resolve_nel_methods(selection: list[str] | None) -> list[str] | None:
@@ -328,29 +354,67 @@ def _linking_columns(ann: dict) -> list[tuple]:
     ] or [(None, None, None)]
 
 
-def _write_tsv(path: Path, rows: list[tuple[str, dict]], with_nel: bool = False) -> None:
-    """Write the per-language annotation table.
+def _tsv_header(with_nel: bool) -> list[str]:
+    """Columns of the per-language annotation table.
 
     Under ``--nel`` four linking columns are appended, and a mention gets one
     row per code it is reported under.  They are not merely left blank in
     NER-only mode: a column that is always empty invites the reader to treat a
     missing code as an unlinked mention rather than as a stage that never ran.
     """
-    path.parent.mkdir(parents=True, exist_ok=True)
-    sorted_rows = sorted(rows, key=lambda r: (r[0], r[1]["start"]))
     header = ["filename", "label", "start", "end", "span", "ner_score"]
     if with_nel:
         header += ["code", "term", "nel_score", "namespace"]
-    with open(path, "w", newline="", encoding="utf-8") as fh:
-        writer = csv.writer(fh, delimiter="\t")
-        writer.writerow(header)
-        for filename, ann in sorted_rows:
-            row = [filename, ann["ner_class"], ann["start"], ann["end"], ann["span"], ann["ner_score"]]
-            if not with_nel:
-                writer.writerow(row)
-                continue
-            for code, term, namespace in _linking_columns(ann):
-                writer.writerow(row + [code, term, ann.get("nel_score"), namespace])
+    return header
+
+
+def _tsv_rows(stem: str, annotations: list[dict], with_nel: bool = False) -> Iterator[list]:
+    """TSV rows for one document, in the order its annotations come in.
+
+    ``join_all_entities`` already sorts each document by offset, so writing
+    documents in filename order is what keeps the table sorted.
+    """
+    for ann in annotations:
+        row = [stem, ann["ner_class"], ann["start"], ann["end"], ann["span"], ann["ner_score"]]
+        if not with_nel:
+            yield row
+            continue
+        for code, term, namespace in _linking_columns(ann):
+            yield row + [code, term, ann.get("nel_score"), namespace]
+
+
+def _open_tsv(path: Path, with_nel: bool, keep: set[str] | None = None):
+    """Open the per-language TSV for appending, header already in place.
+
+    Without *keep* the file starts afresh.  With it — the stems ``--resume``
+    found finished — the rows of every other document are dropped first: those
+    are rows flushed by a run that died before writing the document's JSON,
+    and the document is about to be annotated again.  Filtering streams
+    through a temporary file, so it costs no memory however large the table.
+
+    Returns ``None`` when the existing table has other columns than this run
+    would write, i.e. the earlier run was made with or without ``--nel`` where
+    this one is not; appending would mix the two layouts.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    header = _tsv_header(with_nel)
+
+    if keep is not None and path.exists():
+        tmp = path.with_name(path.name + ".tmp")
+        with open(path, newline="", encoding="utf-8") as src:
+            reader = csv.reader(src, delimiter="\t")
+            if next(reader, None) != header:
+                return None
+            with open(tmp, "w", newline="", encoding="utf-8") as dst:
+                writer = csv.writer(dst, delimiter="\t")
+                writer.writerow(header)
+                writer.writerows(row for row in reader if row and row[0] in keep)
+        os.replace(tmp, path)
+        return open(path, "a", newline="", encoding="utf-8")
+
+    fh = open(path, "w", newline="", encoding="utf-8")
+    csv.writer(fh, delimiter="\t").writerow(header)
+    return fh
 
 
 def _write_ann(path: Path, annotations: list[dict], with_nel: bool = False) -> None:
@@ -377,8 +441,36 @@ def _write_json(path: Path, text: str, annotations: list[dict], footer: dict, fo
     """
     path.parent.mkdir(parents=True, exist_ok=True)
     result = formatter.serialize(text, annotations, footer)
-    with open(path, "w", encoding="utf-8") as fh:
+    # Written beside the target and renamed into place: --resume reads the
+    # file's existence as "this document is finished", so a run killed
+    # mid-write must not leave a truncated one behind.
+    tmp = path.with_name(path.name + ".tmp")
+    with open(tmp, "w", encoding="utf-8") as fh:
         json.dump(result, fh, ensure_ascii=False, indent=2)
+    os.replace(tmp, path)
+
+
+def _document_batches(
+    json_files: Iterable[Path], lang: str, batch_size: int, rejected: list[Path],
+) -> Iterator[list[tuple[Path, str, dict]]]:
+    """Load documents lazily, ``batch_size`` usable ones at a time.
+
+    Rejected files are appended to *rejected* rather than yielded, so the
+    caller can count them once the generator is exhausted.
+    """
+    batch: list[tuple[Path, str, dict]] = []
+    for json_file in json_files:
+        document = _load_document(json_file, lang)
+        if document is None:
+            rejected.append(json_file)
+            continue
+        text, metadata = document
+        batch.append((json_file, text, metadata))
+        if len(batch) == batch_size:
+            yield batch
+            batch = []
+    if batch:
+        yield batch
 
 
 def _parse_args() -> argparse.Namespace:
@@ -399,7 +491,16 @@ def _parse_args() -> argparse.Namespace:
                         "combines them by rank fusion. 'dense' needs the NEL model and a built "
                         "vector DB per entity type ('uv run python -m app.model_manager'); the "
                         "others need only the gazetteer. Default: NER only.")
-    return p.parse_args()
+    p.add_argument("-b", "--batch-size", type=int, default=DEFAULT_BATCH_SIZE, metavar="N",
+                   help="Documents loaded and annotated at a time; bounds peak memory "
+                        f"(default: {DEFAULT_BATCH_SIZE})")
+    p.add_argument("--resume",         action="store_true",
+                   help="Skip documents whose formatted/{stem}.json already exists and keep "
+                        "their TSV rows, continuing a run that stopped partway through.")
+    args = p.parse_args()
+    if args.batch_size < 1:
+        p.error("--batch-size must be at least 1")
+    return args
 
 
 def main() -> None:
@@ -413,6 +514,7 @@ def main() -> None:
         sys.exit(1)
 
     from app.model_manager.resolver import LocalResolver
+    from app.src import ner
     from app.src.format import Dt4hFormatter
     from app.src.ner import encoder_inference
     from app.utils.results_postprocessing import join_all_entities
@@ -420,6 +522,7 @@ def main() -> None:
     # Deferred: importing the pipeline module pulls in the NEL and negation
     # stacks, which an NER-only run has no use for.
     if with_nel:
+        from app.src.nel import lexical_index, rerank, vector_store
         from app.src.pipelines import BiencoderPipeline
 
     try:
@@ -431,6 +534,7 @@ def main() -> None:
     log.info("Input : %s", args.input.resolve())
     log.info("Output: %s", args.output.resolve())
     log.info("Stages: %s", f"NER + NEL ({', '.join(nel_methods)})" if with_nel else "NER only")
+    log.info("Batch : %d document(s)%s", args.batch_size, ", resuming" if args.resume else "")
     if with_nel and nel_methods != list(DEFAULT_NEL_METHODS):
         log.warning(
             "NEL methods other than the default change which codes are emitted — "
@@ -476,30 +580,36 @@ def main() -> None:
         if with_nel and not _check_nel_registry(resolver, lang, entity_types, nel_methods):
             continue
 
-        json_files = sorted(lang_dir.glob("*.json"))
+        # Sorted by stem, not by name: the TSV is ordered by filename stem and
+        # is written in the order documents are processed. The two differ when
+        # one stem is a prefix of another ("a-b.json" sorts before "a.json").
+        json_files = sorted(lang_dir.glob("*.json"), key=lambda p: p.stem)
         if not json_files:
             log.warning("[%s] No .json files found — skip.", lang)
             continue
         log.info("[%s] Input files : %d", lang, len(json_files))
 
-        loaded: list[tuple[Path, str, dict]] = []
-        for json_file in json_files:
-            document = _load_document(json_file, lang)
-            if document is None:
-                rejected_total += 1
-                continue
-            text, metadata = document
-            loaded.append((json_file, text, metadata))
+        out_dir = args.output / lang
+        finished: set[str] | None = None
+        if args.resume:
+            finished = {p.stem for p in (out_dir / "formatted").glob("*.json")}
+            pending = [f for f in json_files if f.stem not in finished]
+            log.info("[%s] Resuming    : %d already done, %d to go",
+                     lang, len(json_files) - len(pending), len(pending))
+            json_files = pending
 
-        n_rejected = len(json_files) - len(loaded)
-        if n_rejected:
-            log.warning("[%s] Rejected %d of %d document(s) — see errors above.",
-                        lang, n_rejected, len(json_files))
-        if not loaded:
+        rejected: list[Path] = []
+        batches = _document_batches(json_files, lang, args.batch_size, rejected)
+        # Pulled before anything is loaded or opened, so a language with
+        # nothing to annotate pays for no model and leaves its TSV alone.
+        first = next(batches, None)
+        if first is None:
+            rejected_total += len(rejected)
+            if rejected:
+                log.warning("[%s] Rejected %d of %d document(s) — see errors above.",
+                            lang, len(rejected), len(json_files))
             log.warning("[%s] No usable documents — skip.", lang)
             continue
-
-        texts = [text for _, text, _ in loaded]
 
         pipeline = None
         if with_nel:
@@ -525,38 +635,69 @@ def main() -> None:
                 log.debug("[%s] NEL pipeline traceback:", lang, exc_info=True)
                 continue
 
-        log.info("[%s] Running %s inference on %d document(s)...",
-                 lang, "NER + NEL" if with_nel else "NER", len(texts))
+        tsv_path = out_dir / f"{lang}.tsv"
+        tsv = _open_tsv(tsv_path, with_nel, keep=finished)
+        if tsv is None:
+            log.error("[%s] %s has other columns than this run writes — it was made "
+                      "%s --nel. Rerun without --resume — skip.",
+                      lang, tsv_path, "without" if with_nel else "with")
+            del pipeline
+            continue
 
-        raw = None
-        if pipeline is not None:
-            flat = pipeline.predict(texts)  # [n_texts][n_entities], already joined
-        else:
-            raw = encoder_inference(texts=texts, ner_models=model_paths, version=2)
-            flat = join_all_entities(raw)  # [n_texts][n_entities]
+        log.info("[%s] Running %s inference in batches of %d...",
+                 lang, "NER + NEL" if with_nel else "NER", args.batch_size)
 
-        total_ann = sum(len(a) for a in flat)
-        log.info("[%s] Inference done — %d annotation(s) found", lang, total_ann)
+        n_docs = n_ann = 0
+        with tsv:
+            tsv_writer = csv.writer(tsv, delimiter="\t")
+            for batch_no, batch in enumerate(itertools.chain([first], batches), start=1):
+                texts = [text for _, text, _ in batch]
+                if pipeline is not None:
+                    flat = pipeline.predict(texts)  # [n_texts][n_entities], already joined
+                else:
+                    flat = join_all_entities(
+                        encoder_inference(texts=texts, ner_models=model_paths, version=2)
+                    )  # [n_texts][n_entities]
 
-        ann_rows: list[tuple[str, dict]] = []
-        for (json_file, text, metadata), annotations in zip(loaded, flat):
-            stem = json_file.stem
-            _write_ann(args.output / lang / "raw" / f"{stem}.ann", annotations, with_nel=with_nel)
-            _write_json(args.output / lang / "formatted" / f"{stem}.json",
-                        text, annotations, metadata, formatter)
-            log.info("[%s]   %s → %d annotation(s)", lang, json_file.name, len(annotations))
-            for ann in annotations:
-                ann_rows.append((stem, ann))
-        processed_total += len(loaded)
+                # TSV rows first and flushed, the JSON last: the JSON is what
+                # --resume takes as "finished", so a crash in between leaves
+                # rows that the next --resume drops, never a gap.
+                for (json_file, _, _), annotations in zip(batch, flat):
+                    tsv_writer.writerows(_tsv_rows(json_file.stem, annotations, with_nel))
+                tsv.flush()
 
-        tsv_path = args.output / lang / f"{lang}.tsv"
-        _write_tsv(tsv_path, ann_rows, with_nel=with_nel)
+                for (json_file, text, metadata), annotations in zip(batch, flat):
+                    stem = json_file.stem
+                    _write_ann(out_dir / "raw" / f"{stem}.ann", annotations, with_nel=with_nel)
+                    _write_json(out_dir / "formatted" / f"{stem}.json",
+                                text, annotations, metadata, formatter)
+                    log.debug("[%s]   %s → %d annotation(s)", lang, json_file.name, len(annotations))
+
+                n_docs += len(batch)
+                n_ann += sum(len(a) for a in flat)
+                log.info("[%s] Batch %d: %d document(s), %d annotation(s) — %d/%d done",
+                         lang, batch_no, len(batch), sum(len(a) for a in flat),
+                         n_docs + len(rejected), len(json_files))
+
+        processed_total += n_docs
+        rejected_total += len(rejected)
+        if rejected:
+            log.warning("[%s] Rejected %d of %d document(s) — see errors above.",
+                        lang, len(rejected), len(json_files))
+        log.info("[%s] Inference done — %d annotation(s) over %d document(s)", lang, n_ann, n_docs)
         log.info("[%s] Combined TSV → %s", lang, tsv_path)
         log.info("[%s] Done.", lang)
 
-        # The pipeline holds the FAISS index and the NEL encoder; dropping it
-        # is what makes the next language start from a clean allocation.
-        del raw, flat, texts, loaded, pipeline
+        # Dropping the pipeline alone frees nothing: the NER models, the NEL
+        # encoder and the indexes live in per-process caches keyed by path, and
+        # the next language would otherwise load its own on top of them.
+        # Crosswalks are kept — they are shared by every language.
+        del pipeline
+        ner.clear_cache()
+        if with_nel:
+            vector_store.clear_cache()
+            lexical_index.clear_cache()
+            rerank.clear_cache()
         gc.collect()
         if _has_cuda:
             torch.cuda.empty_cache()

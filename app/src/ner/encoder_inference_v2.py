@@ -19,6 +19,13 @@ from app.config import device
 from app.utils.text_preprocessing import build_inference_chunks
 from app.utils.results_postprocessing import merge_contiguous_entities
 
+# Keyed by (resolved checkpoint, agg_strat, merge_entities, score_mode): the
+# last two are read at inference time, so two callers differing only there
+# must not share an instance. Loading a checkpoint dominates the cost of a
+# small batch, so without this every /process_bulk request and every
+# run_nerl.py batch would reload every model.
+_MODEL_CACHE: dict[tuple, "NerModel"] = {}
+
 
 class NerModel:
     """
@@ -181,7 +188,7 @@ def ner_inference_v2(
     """
     results = []
     for model_checkpoint in ner_models:
-        model = NerModel(
+        model = get_ner_model(
             model_checkpoint,
             agg_strat=agg_strat,
             merge_entities=merge_entities,
@@ -189,3 +196,35 @@ def ner_inference_v2(
         )
         results.append(model.infer(texts, batch_size=batch_size))
     return results
+
+
+def get_ner_model(
+    model_checkpoint: Path,
+    agg_strat: str = "simple",
+    merge_entities: bool = True,
+    score_mode: str = "mean",
+) -> NerModel:
+    """Load a NER model once per process and reuse it thereafter.
+
+    Every model a caller has used stays resident until :func:`clear_cache`,
+    so a long-lived process that moves between model sets (``run_nerl.py``
+    going from one language to the next) must clear it in between.
+    """
+    key = (Path(model_checkpoint).resolve(), agg_strat, merge_entities, score_mode)
+    cached = _MODEL_CACHE.get(key)
+    if cached is not None:
+        return cached
+
+    model = NerModel(
+        model_checkpoint,
+        agg_strat=agg_strat,
+        merge_entities=merge_entities,
+        score_mode=score_mode,
+    )
+    _MODEL_CACHE[key] = model
+    return model
+
+
+def clear_cache() -> None:
+    """Drop every cached NER model."""
+    _MODEL_CACHE.clear()

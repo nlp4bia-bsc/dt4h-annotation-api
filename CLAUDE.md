@@ -18,7 +18,7 @@ uv run python -m app.model_manager
 # Pre-flight validation (checks only — the model manager above builds the vector DBs)
 uv run test_init.py
 
-# Test suite — offline, ~1s, needs no registry.yaml, resources, or model download
+# Test suite — offline, ~4s, needs no registry.yaml, resources, or model download
 uv run pytest
 
 # Batch NER over CDM JSON documents in data/{lang}/
@@ -31,6 +31,10 @@ uv run run_nerl.py --nel -l es -e disease symptom
 # Entity linking with other retrieval methods (gazetteer only, no vector DB)
 uv run run_nerl.py --nel exact -l es
 uv run run_nerl.py --nel dense tfidf bm25 -l es   # several = rank fusion
+
+# Large corpora: memory is bounded by --batch-size (documents, default 256);
+# --resume continues a run that died, skipping documents already written
+uv run run_nerl.py --nel -l es -b 128 --resume
 
 # Run server
 uv run flask run --host=0.0.0.0 --port=5000
@@ -73,7 +77,8 @@ POST /process_bulk?language=es&entities=disease,symptom&negation=false
      module-level _pipeline_cache; method is hardcoded 'biencoder'
   → pipeline.predict(texts)
      ├─ NER: HuggingFace token-classification (encoder_inference, v2)
-     │       sentence splitting + max-length chunking
+     │       sentence splitting + max-length chunking; checkpoints loaded
+     │       once per process (encoder_inference_v2._MODEL_CACHE)
      ├─ NEL: EntityLinker, one per entity type, built in the pipeline's
      │       __init__ and reused across requests
      │       ├─ DenseGenerator: SentenceTransformer → FAISS IndexFlatIP
@@ -100,6 +105,8 @@ POST /process_bulk?language=es&entities=disease,symptom&negation=false
 ```
 
 Endpoints, all of them: `GET /` (health), `POST /process_bulk`, `POST /sync_models`.
+A successful `/sync_models` clears `_pipeline_cache` and the NER / vector store
+/ lexical / rerank caches, since a re-download or rebuild reuses the same paths.
 
 ## run_nerl.py input contract
 
@@ -125,6 +132,24 @@ The language directory name is authoritative — it selects the models.
 
 Outputs per language: `results/{lang}/raw/{stem}.ann`,
 `results/{lang}/formatted/{stem}.json`, `results/{lang}/{lang}.tsv`.
+
+Documents are streamed in stem order, `--batch-size` usable ones at a time:
+load, annotate, write, drop. Nothing accumulates across batches — the TSV is
+appended per batch, and it stays sorted by `(stem, start)` because input is
+processed in stem order and `join_all_entities` sorts within a document. Do
+not reintroduce a corpus-wide list or sort; that is what made large runs OOM.
+The models are the exception: all of a language's NER models (and, under
+`--nel`, its encoder and indexes) stay resident until the language ends.
+
+Per document, the TSV rows are written and flushed first and the formatted
+JSON last, atomically (`.tmp` + `os.replace`). The JSON is therefore the
+"finished" marker: `--resume` skips stems whose formatted JSON exists and
+drops TSV rows of any other stem before appending. It checks only the TSV
+header, not that entity types or NEL methods match the earlier run.
+
+Between languages the per-path model caches are cleared — `ner.clear_cache()`
+and, under `--nel`, `vector_store` / `lexical_index` / `rerank`. Deleting the
+pipeline alone frees nothing, since the caches still reference everything.
 
 `--nel` appends `code` / `term` / `namespace` to the `.ann` rows and `code` /
 `term` / `nel_score` / `namespace` to the TSV, one row per code a mention is
@@ -162,7 +187,8 @@ The crosswalk step itself has no flag: it runs under every `--nel` method.
 | `app/model_manager/resolver.py` | `LocalResolver` — single source of truth for all resource paths |
 | `app/model_manager/default_registry.yaml` | Template registry with HuggingFace repo IDs |
 | `app/utils/results_postprocessing.py` | `merge_contiguous_entities`, `join_all_entities` |
-| `run_nerl.py` | Batch CDM JSON CLI — NER, or NER + NEL under `--nel [METHOD ...]` |
+| `run_nerl.py` | Batch CDM JSON CLI — NER, or NER + NEL under `--nel [METHOD ...]`; streams in batches, `--resume` |
+| `app/src/ner/encoder_inference_v2.py` | `NerModel`, `get_ner_model` — per-process NER checkpoint cache |
 | `docs/cdm_open_questions.md` | Deferred CDM decisions and known gaps |
 
 ## CDM models
@@ -326,7 +352,7 @@ language has a `negation` entry, but most have `repo_id: null`.
 
 ## Tests
 
-`uv run pytest` — 191 tests, ~1.5s, fully offline. No `registry.yaml`, no
+`uv run pytest` — 200 tests, ~4s, fully offline. No `registry.yaml`, no
 `app/resources/`, no model download, no network.
 
 The NEL encoder is replaced by `tests/conftest.py:StubEncoder`, which embeds
@@ -342,8 +368,9 @@ loading, real sklearn vectorizers, real CDM serialisation. All artifacts go to
 pytest's `tmp_path`; the suite writes nothing into the repo.
 
 An autouse fixture clears the module-level caches in `vector_store`,
-`lexical_index` and `crosswalk` around every test. Without it a test can pass only because an
-earlier one warmed a cache.
+`lexical_index` and `crosswalk` around every test. Without it a test can pass
+only because an earlier one warmed a cache. The NER model cache is cleared by
+the fixtures in `test_run_nerl_batching.py`, the only tests that touch it.
 
 Keep the suite offline. A test needing a real checkpoint belongs behind an
 explicit marker, not in the default run.
