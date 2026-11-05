@@ -104,6 +104,9 @@ import sys
 from collections.abc import Iterable, Iterator
 from pathlib import Path
 
+from tqdm import tqdm
+from tqdm.contrib.logging import logging_redirect_tqdm
+
 logging.basicConfig(level=logging.INFO, format="%(asctime)s  %(levelname)-8s  %(message)s", datefmt="%H:%M:%S")
 log = logging.getLogger(__name__)
 # tokenization false alarm since preprococessing handles model size overflow
@@ -473,6 +476,43 @@ def _document_batches(
         yield batch
 
 
+# Spelled out rather than tqdm's default, which reads "[04:12<02:34, 6.3it/s]"
+# — the people running this are not all developers.
+_PROGRESS_FORMAT = (
+    "{desc} {percentage:3.0f}% |{bar}| {n_fmt}/{total_fmt} reports"
+    " | elapsed {elapsed} | time left ~{remaining}{postfix}"
+)
+
+
+def _progress_bar(lang: str, total: int, already_done: int) -> tqdm:
+    """Per-language progress bar over input reports.
+
+    Counts every report handled — annotated or rejected — so it reaches 100%.
+    Under ``--resume`` it starts at *already_done*; the time-left estimate is
+    based only on reports processed in this run.  Hidden automatically when
+    stderr is not a terminal (``nohup``, redirected to a file), where the
+    per-batch log line is the progress record instead.
+    """
+    return tqdm(
+        total=total, initial=already_done, desc=f"[{lang}] Processing",
+        bar_format=_PROGRESS_FORMAT, dynamic_ncols=True, disable=None,
+    )
+
+
+def _advance(bar: tqdm, already_done: int, annotated: int, rejected: int) -> None:
+    """Move *bar* to *annotated* + *rejected* reports handled in this run.
+
+    *already_done* is passed in rather than read from ``bar.initial``: a bar
+    disabled for a non-terminal never sets that attribute.
+    """
+    done = already_done + annotated + rejected
+    bar.set_postfix_str(
+        f"{annotated} annotated, {rejected} rejected, {bar.total - done} to go",
+        refresh=False,
+    )
+    bar.update(done - bar.n)
+
+
 def _parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Batch NER (optionally + NEL) inference over clinical text samples.")
     p.add_argument("-i", "--input",    type=Path, default=Path("data"),    metavar="DIR",
@@ -590,6 +630,7 @@ def main() -> None:
         log.info("[%s] Input files : %d", lang, len(json_files))
 
         out_dir = args.output / lang
+        n_inputs = len(json_files)
         finished: set[str] | None = None
         if args.resume:
             finished = {p.stem for p in (out_dir / "formatted").glob("*.json")}
@@ -648,7 +689,10 @@ def main() -> None:
                  lang, "NER + NEL" if with_nel else "NER", args.batch_size)
 
         n_docs = n_ann = 0
-        with tsv:
+        # Log lines are routed through tqdm so they print above the bar
+        # instead of tearing through it.
+        already_done = n_inputs - len(json_files)
+        with tsv, logging_redirect_tqdm(), _progress_bar(lang, n_inputs, already_done) as bar:
             tsv_writer = csv.writer(tsv, delimiter="\t")
             for batch_no, batch in enumerate(itertools.chain([first], batches), start=1):
                 texts = [text for _, text, _ in batch]
@@ -678,6 +722,13 @@ def main() -> None:
                 log.info("[%s] Batch %d: %d document(s), %d annotation(s) — %d/%d done",
                          lang, batch_no, len(batch), sum(len(a) for a in flat),
                          n_docs + len(rejected), len(json_files))
+
+                # Rejections are found while the next batch loads, so advance
+                # by everything handled so far rather than by len(batch).
+                _advance(bar, already_done, n_docs, len(rejected))
+
+            # Reports rejected after the last usable one never start a batch.
+            _advance(bar, already_done, n_docs, len(rejected))
 
         processed_total += n_docs
         rejected_total += len(rejected)

@@ -141,6 +141,13 @@ not reintroduce a corpus-wide list or sort; that is what made large runs OOM.
 The models are the exception: all of a language's NER models (and, under
 `--nel`, its encoder and indexes) stay resident until the language ends.
 
+Each language shows a `tqdm` progress bar over its reports — annotated plus
+rejected, so it reaches 100% — with a time-left estimate. It advances once per
+batch, so the estimate settles after a few batches. Under `--resume` it starts
+at the finished count. Log lines go through `logging_redirect_tqdm` so they
+print above the bar. When stderr is not a terminal (`nohup`, a log file,
+pytest) the bar is hidden, and the per-batch log line is the progress record.
+
 Per document, the TSV rows are written and flushed first and the formatted
 JSON last, atomically (`.tmp` + `os.replace`). The JSON is therefore the
 "finished" marker: `--resume` skips stems whose formatted JSON exists and
