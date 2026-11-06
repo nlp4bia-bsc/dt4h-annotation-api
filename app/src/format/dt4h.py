@@ -96,7 +96,9 @@ unlinked one leaves them ``null``:
   field ``null`` rather than claiming ``other``.
 * ``nel_component_version`` — the constant ``NEL_COMPONENT_VERSION``.
 * ``controlled_vocabulary_namespace`` — the terminology of this row's code.
-* ``controlled_vocabulary_version`` — the constant
+* ``controlled_vocabulary_version`` — the release of this row's terminology,
+  from ``vocabulary_version``: ``CONTROLLED_VOCABULARY_VERSIONS`` for the
+  terminologies that have their own (ICD-9 is frozen at 2015), else
   ``CONTROLLED_VOCABULARY_VERSION``.
 * ``controlled_vocabulary_source`` — how the gazetteer's terms were obtained:
   ``original``, or ``machine translation`` for SNOMED CT outside es/en.
@@ -198,8 +200,20 @@ NEL_COMPONENT_TYPE_MAP: dict[str, str] = {
 #: Version of the linking component, reported for every linked annotation.
 NEL_COMPONENT_VERSION = "1.2"
 
-#: Edition/release of every terminology a code is reported under.
+#: Edition/release of a terminology a code is reported under, unless
+#: ``CONTROLLED_VOCABULARY_VERSIONS`` names one for its namespace.
 CONTROLLED_VOCABULARY_VERSION = "2026"
+
+#: Namespaces whose release differs from ``CONTROLLED_VOCABULARY_VERSION``.
+#: ICD-9-CM stopped being updated after its 2015 release.
+CONTROLLED_VOCABULARY_VERSIONS: dict[str, str] = {
+    "ICD9": "2015",
+}
+
+
+def vocabulary_version(namespace: str | None) -> str:
+    """CDM ``controlled_vocabulary_version`` for a code in *namespace*."""
+    return CONTROLLED_VOCABULARY_VERSIONS.get(namespace, CONTROLLED_VOCABULARY_VERSION)
 
 
 def concept_codes(ann: dict) -> list[dict]:
@@ -379,7 +393,7 @@ class Dt4hFormatter(DataFormatter):
                 "controlled_vocabulary_concept_official_term": entry.get("term"),
                 "controlled_vocabulary_namespace":             entry.get("namespace"),
                 "controlled_vocabulary_source":                entry.get("source"),
-                "controlled_vocabulary_version":               CONTROLLED_VOCABULARY_VERSION,
+                "controlled_vocabulary_version":               vocabulary_version(entry.get("namespace")),
             }
             for entry in codes
         ]

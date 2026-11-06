@@ -31,9 +31,9 @@ logger = logging.getLogger(__name__)
 # Which terminologies apply to which entity type
 # ---------------------------------------------------------------------------
 
-#: Registry entity type → (gazetteer terminology, crosswalks to try in order).
-#: Only the first crosswalk with a target for a code is used, so ICD-9 is
-#: consulted only when ICD-10 (or ICD-10-PCS) has nothing.
+#: Registry entity type → (gazetteer terminology, crosswalks it is mapped through).
+#: Every crosswalk contributes its targets, in this order: a SNOMED CT code with
+#: both an ICD-10 and an ICD-9 mapping is reported under both.
 ENTITY_TERMINOLOGIES: dict[str, tuple[str, tuple[str, ...]]] = {
     "disease":   ("SNOMED CT", ("icd10", "icd9")),
     "symptom":   ("SNOMED CT", ("icd10", "icd9")),
@@ -184,13 +184,10 @@ class Terminology:
         """
         codes = [{"code": code, "term": term, "namespace": self.namespace, "source": self.source}]
         for crosswalk in self.crosswalks:
-            targets = crosswalk[code]
-            if targets:
-                codes += [
-                    {"code": target, "term": None, "namespace": crosswalk.namespace, "source": ORIGINAL}
-                    for target in targets
-                ]
-                break
+            codes += [
+                {"code": target, "term": None, "namespace": crosswalk.namespace, "source": ORIGINAL}
+                for target in crosswalk[code]
+            ]
         return codes
 
 

@@ -238,7 +238,7 @@ link that may not exist:
 | `controlled_vocabulary_concept_identifier` | this row's code |
 | `controlled_vocabulary_concept_official_term` | gazetteer term; `null` on mapped rows |
 | `controlled_vocabulary_namespace` | this row's terminology, from `codes[i].namespace` |
-| `controlled_vocabulary_version` | constant `CONTROLLED_VOCABULARY_VERSION` = `"2026"` |
+| `controlled_vocabulary_version` | per row, `vocabulary_version(namespace)`: `"2015"` for ICD9 (`CONTROLLED_VOCABULARY_VERSIONS`), else `CONTROLLED_VOCABULARY_VERSION` = `"2026"` |
 | `controlled_vocabulary_source` | `original`; `machine translation` for SNOMED CT outside es/en |
 
 Namespace and source are decided in the pipeline (`crosswalk.Terminology`), not
@@ -252,14 +252,16 @@ guessed by the formatter. A pipeline that links without the crosswalk step
 
 ## Crosswalks
 
-`app/src/nel/crosswalk.py` reports a linked code under a second terminology.
-`ENTITY_TERMINOLOGIES` holds the chain per entity type; the first crosswalk with
-a target wins:
+`app/src/nel/crosswalk.py` reports a linked code under further terminologies.
+`ENTITY_TERMINOLOGIES` lists the crosswalks per entity type, and every one of
+them contributes: a SNOMED CT code mapped in both ICD-10 and ICD-9 is reported
+under both, ICD-10 rows first. There is no fallback — ICD-9 is not reserved for
+codes ICD-10 lacks.
 
-| Entity | Gazetteer | Crosswalk chain |
+| Entity | Gazetteer | Crosswalks, in row order |
 |---|---|---|
-| `disease`, `symptom` | SNOMED CT | ICD10 → ICD9 |
-| `procedure` | SNOMED CT | ICD10PCS → ICD9 |
+| `disease`, `symptom` | SNOMED CT | ICD10, ICD9 |
+| `procedure` | SNOMED CT | ICD10PCS, ICD9 |
 | `drug` | UMLS | ATC, read from the gazetteer's own `SAB=ATC` / `SAB_code` rows |
 
 The SNOMED crosswalks are Parquet files with `source_code` and `target_code`
